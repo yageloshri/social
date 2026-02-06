@@ -38,6 +38,11 @@ class ScrapingConfig:
     instagram_handle: str = field(default_factory=lambda: os.getenv("INSTAGRAM_HANDLE", ""))
     tiktok_handle: str = field(default_factory=lambda: os.getenv("TIKTOK_HANDLE", ""))
 
+    # Scraping limits - optimize for cost/speed
+    posts_per_scan: int = 10          # Only fetch last 10 posts per platform
+    active_posts_limit: int = 30      # Keep 30 most recent posts in active analysis
+    archive_after_days: int = 90      # Archive posts older than 90 days
+
 
 @dataclass
 class CreatorProfile:
