@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python3 main.py"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+restartPolicyMaxRetries = 5
+
+[service]
+internalPort = 8080
