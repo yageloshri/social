@@ -2,7 +2,7 @@
 ProfileScanner Skill
 ====================
 Scrapes and processes social media content from Instagram and TikTok.
-Uses Instaloader for Instagram and Apify for TikTok.
+Uses Apify for both platforms - handles proxies and rate limiting automatically.
 """
 
 import asyncio
@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 import logging
 import json
 
-import instaloader
 from apify_client import ApifyClient
 
 from .base import BaseSkill
@@ -26,24 +25,20 @@ class ProfileScanner(BaseSkill):
     Scrapes social media profiles for content and metrics.
 
     Capabilities:
-    - Fetch posts from Instagram (via Instaloader)
+    - Fetch posts from Instagram (via Apify)
     - Fetch videos from TikTok (via Apify)
     - Extract metrics: views, likes, comments, shares, saves
     - Calculate engagement rates
     - Track metric changes over time
+
+    Uses Apify for both platforms because:
+    - Handles proxies automatically (no blocks/rate limits)
+    - More reliable than direct scraping
+    - We already pay for it
     """
 
     def __init__(self):
         super().__init__("ProfileScanner")
-        self.insta_loader = instaloader.Instaloader(
-            download_pictures=False,
-            download_videos=False,
-            download_video_thumbnails=False,
-            download_geotags=False,
-            download_comments=False,
-            save_metadata=False,
-            compress_json=False,
-        )
         self.apify_client = ApifyClient(config.scraping.apify_token) if config.scraping.apify_token else None
 
     async def execute(
@@ -118,7 +113,7 @@ class ProfileScanner(BaseSkill):
 
     async def _scan_instagram(self, handle: str, max_posts: int = 10) -> Dict[str, Any]:
         """
-        Scan Instagram profile (OPTIMIZED - only last N posts).
+        Scan Instagram profile using Apify (handles proxies and rate limits).
 
         Args:
             handle: Instagram username
@@ -129,12 +124,33 @@ class ProfileScanner(BaseSkill):
         """
         result = {"new_posts": 0, "updated_posts": 0, "errors": [], "analyses": []}
 
+        if not self.apify_client:
+            result["errors"].append("Apify client not configured")
+            return result
+
         try:
-            # Run synchronous instaloader in executor
-            loop = asyncio.get_event_loop()
-            posts_data = await loop.run_in_executor(
-                None, self._fetch_instagram_posts, handle, max_posts
-            )
+            # Run Apify Instagram scraper
+            run_input = {
+                "usernames": [handle],
+                "resultsLimit": max_posts,
+            }
+
+            logger.info(f"Running Apify Instagram scraper for @{handle}...")
+
+            # Use the Instagram Profile Scraper actor
+            run = self.apify_client.actor("apify/instagram-profile-scraper").call(run_input=run_input)
+
+            # Fetch results
+            items = list(self.apify_client.dataset(run["defaultDatasetId"]).iterate_items())
+
+            # The profile scraper returns profile data with posts in 'latestPosts' field
+            posts_list = []
+            for item in items:
+                # Extract posts from the profile's latestPosts field
+                latest_posts = item.get("latestPosts", [])
+                posts_list.extend(latest_posts)
+
+            logger.info(f"Apify returned {len(posts_list)} posts for Instagram")
 
             # Get historical averages for comparison
             historical = await self.get_historical_averages("instagram")
@@ -142,12 +158,66 @@ class ProfileScanner(BaseSkill):
             session = db.get_session()
             try:
                 new_posts_for_analysis = []
+                import re
 
-                for post_data in posts_data:
-                    existing = session.query(Post).filter_by(post_id=post_data["post_id"]).first()
+                for post in posts_list:
+                    # Get post ID - use shortCode as the unique identifier
+                    post_id = post.get("shortCode") or post.get("id") or post.get("code")
+                    if not post_id:
+                        continue
+
+                    post_id = str(post_id)
+                    existing = session.query(Post).filter_by(post_id=post_id).first()
+
+                    # Get caption and extract hashtags/mentions
+                    caption = post.get("caption", "") or ""
+
+                    # Use provided hashtags or extract from caption
+                    hashtags = post.get("hashtags", [])
+                    if not hashtags and caption:
+                        hashtags = re.findall(r'#(\w+)', caption)
+
+                    # Use provided mentions or extract from caption
+                    mentions = post.get("mentions", [])
+                    if not mentions and caption:
+                        mentions = re.findall(r'@(\w+)', caption)
+
+                    # Determine media type
+                    post_type = post.get("type", "").lower()
+                    if post_type == "video" or post.get("isVideo"):
+                        media_type = "video"
+                    elif post_type == "sidecar" or post.get("childPosts"):
+                        media_type = "carousel"
+                    else:
+                        media_type = "image"
+
+                    # Parse timestamp
+                    posted_at = None
+                    timestamp = post.get("timestamp") or post.get("takenAt")
+                    if timestamp:
+                        if isinstance(timestamp, str):
+                            try:
+                                posted_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                            except:
+                                pass
+                        elif isinstance(timestamp, (int, float)):
+                            posted_at = datetime.fromtimestamp(timestamp)
+
+                    post_data = {
+                        "post_id": post_id,
+                        "url": post.get("url") or f"https://www.instagram.com/p/{post_id}/",
+                        "caption": caption,
+                        "hashtags": hashtags,
+                        "mentions": mentions,
+                        "media_type": media_type,
+                        "views": post.get("videoViewCount", 0) or post.get("videoPlayCount", 0) or post.get("playCount", 0) or 0,
+                        "likes": post.get("likesCount", 0) or post.get("likeCount", 0) or 0,
+                        "comments": post.get("commentsCount", 0) or post.get("commentCount", 0) or 0,
+                        "posted_at": posted_at,
+                    }
 
                     if existing:
-                        # Update existing post metrics (views may have changed)
+                        # Update existing post metrics
                         self._update_post_metrics(session, existing, post_data)
                         result["updated_posts"] += 1
                     else:
@@ -173,7 +243,7 @@ class ProfileScanner(BaseSkill):
                 self._update_scraper_status(
                     session, "instagram",
                     success=True,
-                    posts_fetched=len(posts_data)
+                    posts_fetched=len(posts_list)
                 )
 
                 session.commit()
@@ -199,36 +269,6 @@ class ProfileScanner(BaseSkill):
                 session.close()
 
         return result
-
-    def _fetch_instagram_posts(self, handle: str, max_posts: int) -> List[Dict]:
-        """Fetch Instagram posts (synchronous, run in executor)."""
-        posts_data = []
-
-        try:
-            profile = instaloader.Profile.from_username(self.insta_loader.context, handle)
-            posts = profile.get_posts()
-
-            for i, post in enumerate(posts):
-                if i >= max_posts:
-                    break
-
-                posts_data.append({
-                    "post_id": post.shortcode,
-                    "url": f"https://www.instagram.com/p/{post.shortcode}/",
-                    "caption": post.caption or "",
-                    "hashtags": list(post.caption_hashtags) if post.caption_hashtags else [],
-                    "mentions": list(post.caption_mentions) if post.caption_mentions else [],
-                    "media_type": "video" if post.is_video else ("carousel" if post.typename == "GraphSidecar" else "image"),
-                    "views": post.video_view_count if post.is_video else 0,
-                    "likes": post.likes,
-                    "comments": post.comments,
-                    "posted_at": post.date_utc,
-                })
-
-        except Exception as e:
-            logger.error(f"Error fetching Instagram posts: {e}")
-
-        return posts_data
 
     async def _scan_tiktok(self, handle: str, max_posts: int = 10) -> Dict[str, Any]:
         """

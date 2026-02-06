@@ -4,8 +4,7 @@ anthropic>=0.40.0
 # WhatsApp Integration
 twilio>=9.0.0
 
-# Scraping
-instaloader>=4.10.0
+# Scraping (Apify handles both Instagram and TikTok)
 apify-client>=1.6.0
 
 # RSS Feed Parsing
