@@ -5,18 +5,22 @@ Content Master Agent
 A sophisticated, self-improving content management agent for social media creators.
 
 Usage:
-    python main.py                    # Run with scheduler (production)
+    python main.py                    # Run with webhook + scheduler (production)
     python main.py --test             # Test mode (send test message)
     python main.py --morning          # Run morning routine now
     python main.py --generate         # Generate ideas now
     python main.py --trends           # Check trends now
     python main.py --status           # Show agent status
+    python main.py --webhook-only     # Run only webhook server
+    python main.py --scheduler-only   # Run only scheduler
 """
 
 import asyncio
 import argparse
 import logging
 import sys
+import os
+import threading
 from pathlib import Path
 from rich.console import Console
 from rich.logging import RichHandler
@@ -101,6 +105,11 @@ If you're seeing this, everything is working!
 ✓ AI connected
 ✓ WhatsApp connected
 ✓ Database initialized
+
+💬 You can now chat with me! Try:
+• "רעיון" - Get a content idea
+• "טרנדים" - See what's trending
+• "עזרה" - See all commands
 
 Ready to help you create amazing content! 🎬"""
 
@@ -238,23 +247,87 @@ async def run_status():
     console.print(table)
 
 
+def run_webhook_server():
+    """Run the webhook server in a separate thread."""
+    from agent.webhook import app, init_conversation_handler
+
+    # Initialize conversation handler
+    init_conversation_handler()
+
+    # Get port from environment (Railway sets this)
+    port = int(os.environ.get("PORT", 8080))
+
+    # Run Flask app
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
 async def run_production():
-    """Run in production mode with scheduler."""
+    """Run in production mode with webhook + scheduler."""
     console.print(Panel(
         "[bold green]Content Master Agent[/bold green]\n\n"
         "Starting in production mode...\n"
+        "• Webhook server for WhatsApp conversations\n"
+        "• Scheduler for automated messages\n\n"
         "Press Ctrl+C to stop.",
         border_style="green",
     ))
 
-    # Initialize
+    # Initialize agent
+    await agent.initialize()
+
+    # Start webhook server in a separate thread
+    webhook_thread = threading.Thread(target=run_webhook_server, daemon=True)
+    webhook_thread.start()
+    console.print("[green]✓ Webhook server started[/green]")
+
+    # Start scheduler
+    scheduler.start()
+    console.print("[green]✓ Scheduler started[/green]")
+
+    # Show status
+    port = int(os.environ.get("PORT", 8080))
+    console.print(f"\n[cyan]Webhook URL: http://0.0.0.0:{port}/webhook/whatsapp[/cyan]")
+    console.print("[dim]Set this URL in your Twilio WhatsApp Sandbox settings[/dim]\n")
+
+    # Keep running
+    try:
+        while True:
+            await asyncio.sleep(60)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down...[/yellow]")
+        scheduler.stop()
+
+
+async def run_webhook_only():
+    """Run only the webhook server."""
+    console.print(Panel(
+        "[bold cyan]Content Master Agent - Webhook Server[/bold cyan]\n\n"
+        "Starting webhook server only...\n"
+        "Press Ctrl+C to stop.",
+        border_style="cyan",
+    ))
+
+    # Initialize agent
+    await agent.initialize()
+
+    # Run webhook server (blocking)
+    run_webhook_server()
+
+
+async def run_scheduler_only():
+    """Run only the scheduler."""
+    console.print(Panel(
+        "[bold cyan]Content Master Agent - Scheduler[/bold cyan]\n\n"
+        "Starting scheduler only...\n"
+        "Press Ctrl+C to stop.",
+        border_style="cyan",
+    ))
+
+    # Initialize agent
     await agent.initialize()
 
     # Start scheduler
     scheduler.start()
-
-    # Show status
-    await run_status()
 
     # Keep running
     try:
@@ -272,12 +345,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py                Run with scheduler (production)
+  python main.py                Run with webhook + scheduler (production)
   python main.py --test         Send test message
   python main.py --morning      Run morning routine
   python main.py --generate     Generate content ideas
   python main.py --trends       Check current trends
   python main.py --status       Show agent status
+  python main.py --webhook-only Run only webhook server
+  python main.py --scheduler-only Run only scheduler
         """
     )
 
@@ -286,6 +361,8 @@ Examples:
     parser.add_argument("--generate", action="store_true", help="Generate ideas")
     parser.add_argument("--trends", action="store_true", help="Check trends")
     parser.add_argument("--status", action="store_true", help="Show status")
+    parser.add_argument("--webhook-only", action="store_true", help="Run only webhook server")
+    parser.add_argument("--scheduler-only", action="store_true", help="Run only scheduler")
     parser.add_argument("--skip-validation", action="store_true", help="Skip config validation")
 
     args = parser.parse_args()
@@ -315,6 +392,10 @@ Examples:
         asyncio.run(run_trends())
     elif args.status:
         asyncio.run(run_status())
+    elif args.webhook_only:
+        asyncio.run(run_webhook_only())
+    elif args.scheduler_only:
+        asyncio.run(run_scheduler_only())
     else:
         asyncio.run(run_production())
 

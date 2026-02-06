@@ -230,6 +230,46 @@ class CreatorPreference(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Conversation(Base):
+    """WhatsApp conversation history."""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True)
+
+    # Message details
+    phone_number = Column(String(50))
+    direction = Column(String(20), nullable=False)  # 'incoming' or 'outgoing'
+    content = Column(Text, nullable=False)
+
+    # Context
+    detected_command = Column(String(50))  # If a command was detected
+    detected_preference = Column(String(200))  # If a preference was detected
+    related_idea_id = Column(Integer, ForeignKey("ideas.id"))
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserPreference(Base):
+    """User preferences learned from conversations."""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True)
+
+    # Preference
+    preference_type = Column(String(20), nullable=False)  # 'positive' or 'negative'
+    value = Column(String(500), nullable=False)  # What they like/dislike
+    original_message = Column(Text)  # The message that expressed this
+
+    # Strength (increases with repeated mentions)
+    strength = Column(Float, default=0.5)  # 0-1
+    mention_count = Column(Integer, default=1)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_mentioned = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyReport(Base):
     """Daily summary report."""
     __tablename__ = "daily_reports"
