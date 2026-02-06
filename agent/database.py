@@ -270,6 +270,30 @@ class UserPreference(Base):
     last_mentioned = Column(DateTime, default=datetime.utcnow)
 
 
+class ReminderLog(Base):
+    """Track sent reminders to prevent spam."""
+    __tablename__ = "reminder_logs"
+
+    id = Column(Integer, primary_key=True)
+    reminder_type = Column(String(50), nullable=False)  # 'no_post', 'scraper_failed', etc.
+    message = Column(Text)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScraperStatus(Base):
+    """Track scraper health and last run times."""
+    __tablename__ = "scraper_status"
+
+    id = Column(Integer, primary_key=True)
+    platform = Column(String(20), nullable=False, unique=True)  # 'instagram' or 'tiktok'
+    last_scan_at = Column(DateTime)
+    last_success_at = Column(DateTime)
+    last_error = Column(Text)
+    posts_fetched = Column(Integer, default=0)
+    status = Column(String(20), default="unknown")  # 'working', 'failed', 'unknown'
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class DailyReport(Base):
     """Daily summary report."""
     __tablename__ = "daily_reports"

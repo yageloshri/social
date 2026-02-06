@@ -16,7 +16,7 @@ from apify_client import ApifyClient
 
 from .base import BaseSkill
 from ..config import config
-from ..database import db, Post, PostMetricHistory
+from ..database import db, Post, PostMetricHistory, ScraperStatus
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,13 @@ class ProfileScanner(BaseSkill):
                         session.add(new_post)
                         result["new_posts"] += 1
 
+                # Update scraper status
+                self._update_scraper_status(
+                    session, "instagram",
+                    success=True,
+                    posts_fetched=len(posts_data)
+                )
+
                 session.commit()
             finally:
                 session.close()
@@ -156,6 +163,13 @@ class ProfileScanner(BaseSkill):
         except Exception as e:
             logger.error(f"Instagram scan error: {e}")
             result["errors"].append(str(e))
+            # Update scraper status with error
+            session = db.get_session()
+            try:
+                self._update_scraper_status(session, "instagram", success=False, error=str(e))
+                session.commit()
+            finally:
+                session.close()
 
         return result
 
@@ -258,6 +272,13 @@ class ProfileScanner(BaseSkill):
                         session.add(new_post)
                         result["new_posts"] += 1
 
+                # Update scraper status
+                self._update_scraper_status(
+                    session, "tiktok",
+                    success=True,
+                    posts_fetched=len(items)
+                )
+
                 session.commit()
             finally:
                 session.close()
@@ -265,6 +286,13 @@ class ProfileScanner(BaseSkill):
         except Exception as e:
             logger.error(f"TikTok scan error: {e}")
             result["errors"].append(str(e))
+            # Update scraper status with error
+            session = db.get_session()
+            try:
+                self._update_scraper_status(session, "tiktok", success=False, error=str(e))
+                session.commit()
+            finally:
+                session.close()
 
         return result
 
@@ -360,5 +388,136 @@ class ProfileScanner(BaseSkill):
             query = query.filter(Post.posted_at >= cutoff)
 
             return query.order_by(Post.engagement_rate.desc()).limit(limit).all()
+        finally:
+            session.close()
+
+    def _update_scraper_status(
+        self,
+        session,
+        platform: str,
+        success: bool,
+        posts_fetched: int = 0,
+        error: str = None
+    ):
+        """Update scraper status in database."""
+        status = session.query(ScraperStatus).filter_by(platform=platform).first()
+
+        if not status:
+            status = ScraperStatus(platform=platform)
+            session.add(status)
+
+        status.last_scan_at = datetime.utcnow()
+        if success:
+            status.last_success_at = datetime.utcnow()
+            status.status = "working"
+            status.posts_fetched = posts_fetched
+            status.last_error = None
+        else:
+            status.status = "failed"
+            status.last_error = error
+
+    async def get_scraper_status(self) -> Dict[str, Any]:
+        """
+        Get scraper status for all platforms.
+
+        Returns:
+            Dict with status for each platform
+        """
+        session = db.get_session()
+        try:
+            result = {
+                "instagram": {
+                    "status": "unknown",
+                    "last_scan": None,
+                    "last_success": None,
+                    "error": None,
+                },
+                "tiktok": {
+                    "status": "unknown",
+                    "last_scan": None,
+                    "last_success": None,
+                    "error": None,
+                },
+            }
+
+            for platform in ["instagram", "tiktok"]:
+                status = session.query(ScraperStatus).filter_by(platform=platform).first()
+                if status:
+                    result[platform] = {
+                        "status": status.status,
+                        "last_scan": status.last_scan_at,
+                        "last_success": status.last_success_at,
+                        "posts_fetched": status.posts_fetched,
+                        "error": status.last_error,
+                    }
+
+            # Get total posts count
+            total_posts = session.query(Post).count()
+            result["total_posts"] = total_posts
+
+            # Get average engagement
+            from sqlalchemy import func
+            avg_engagement = session.query(func.avg(Post.engagement_rate)).scalar()
+            result["avg_engagement"] = avg_engagement or 0
+
+            return result
+        finally:
+            session.close()
+
+    async def get_latest_posts_summary(self, limit: int = 3) -> Dict[str, List[Dict]]:
+        """
+        Get latest posts summary for each platform.
+
+        Args:
+            limit: Number of posts per platform
+
+        Returns:
+            Dict with latest posts for each platform
+        """
+        session = db.get_session()
+        try:
+            result = {"instagram": [], "tiktok": []}
+
+            for platform in ["instagram", "tiktok"]:
+                posts = session.query(Post).filter(
+                    Post.platform == platform
+                ).order_by(Post.posted_at.desc()).limit(limit).all()
+
+                for post in posts:
+                    result[platform].append({
+                        "caption": (post.caption or "")[:50] + "..." if post.caption and len(post.caption) > 50 else (post.caption or ""),
+                        "posted_at": post.posted_at,
+                        "views": post.views or 0,
+                        "likes": post.likes or 0,
+                        "comments": post.comments or 0,
+                        "shares": post.shares or 0,
+                        "engagement_rate": post.engagement_rate or 0,
+                    })
+
+            return result
+        finally:
+            session.close()
+
+    async def get_days_since_last_post(self) -> Dict[str, int]:
+        """
+        Get days since last post for each platform.
+
+        Returns:
+            Dict with days since last post per platform
+        """
+        session = db.get_session()
+        try:
+            result = {"instagram": None, "tiktok": None}
+
+            for platform in ["instagram", "tiktok"]:
+                latest = session.query(Post).filter(
+                    Post.platform == platform
+                ).order_by(Post.posted_at.desc()).first()
+
+                if latest and latest.posted_at:
+                    days = (datetime.utcnow() - latest.posted_at).days
+                    result[platform] = days
+
+            return result
         finally:
             session.close()

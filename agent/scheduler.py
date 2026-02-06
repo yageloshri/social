@@ -7,13 +7,16 @@ Uses APScheduler for reliable cron-like scheduling.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 import pytz
 
 from .config import config
 from .core_agent import agent
+from .database import db, ReminderLog, Post
+from .integrations.whatsapp import whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,15 @@ class AgentScheduler:
             replace_existing=True,
         )
 
+        # No-post reminder check - every 6 hours
+        self.scheduler.add_job(
+            self._run_no_post_reminder_check,
+            IntervalTrigger(hours=6),
+            id="no_post_reminder",
+            name="No Post Reminder Check",
+            replace_existing=True,
+        )
+
         logger.info("All jobs scheduled")
 
     async def _run_morning_routine(self):
@@ -170,6 +182,119 @@ class AgentScheduler:
             logger.info(f"Quick update completed: alert_sent={result.get('breaking_alert_sent')}")
         except Exception as e:
             logger.error(f"Quick update error: {e}")
+
+    async def _run_no_post_reminder_check(self):
+        """
+        Check if user hasn't posted in 4+ days and send reminder.
+        Rules:
+        - Threshold: 4 days without posting
+        - Check interval: Every 6 hours
+        - Spam prevention: Wait 12 hours between reminders
+        """
+        try:
+            logger.info("Checking for no-post reminder")
+
+            # Check if reminder was sent in last 12 hours
+            if self._was_reminder_sent_recently("no_post", hours=12):
+                logger.info("Reminder already sent in last 12 hours, skipping")
+                return
+
+            # Check days since last post on any platform
+            days_since = self._get_days_since_last_post()
+
+            if days_since is None:
+                logger.info("No posts found in database, skipping reminder")
+                return
+
+            if days_since >= 4:
+                logger.info(f"User hasn't posted in {days_since} days, sending reminder")
+
+                # Craft reminder message
+                if days_since == 4:
+                    message = """⏰ *תזכורת חברית!*
+
+עברו 4 ימים מהפוסט האחרון שלך! 📱
+
+הקהל שלך מחכה לך! 🙌
+
+💡 רוצה רעיון לתוכן? שלח 'רעיון'
+🔥 רוצה לראות מה חם עכשיו? שלח 'טרנדים'"""
+                elif days_since <= 7:
+                    message = f"""⚠️ *שבוע בלי תוכן!*
+
+עברו כבר {days_since} ימים מהפוסט האחרון שלך.
+
+האלגוריתם אוהב עקביות - בוא נחזיר אותך למשחק! 💪
+
+שלח 'רעיון' ואני אעזור לך להתחיל!"""
+                else:
+                    message = f"""🚨 *הגיע הזמן לחזור!*
+
+עברו {days_since} ימים מהפוסט האחרון.
+
+אני יודע שזה קורה לפעמים, אבל הקהל שלך מתגעגע! ❤️
+
+בוא נתחיל בקטן:
+• שלח 'רעיון' - אני אייצר משהו קל ומהיר
+• שלח 'טרנדים' - אולי משהו אקטואלי יעזור
+
+אני כאן לעזור! 🤝"""
+
+                # Send reminder via WhatsApp
+                sid = whatsapp.send_message(message)
+
+                if sid:
+                    # Log the reminder
+                    self._log_reminder("no_post", message)
+                    logger.info(f"No-post reminder sent, SID: {sid}")
+                else:
+                    logger.error("Failed to send no-post reminder")
+
+            else:
+                logger.info(f"Last post was {days_since} days ago, no reminder needed")
+
+        except Exception as e:
+            logger.error(f"No-post reminder check error: {e}")
+
+    def _get_days_since_last_post(self) -> int:
+        """Get days since the last post on any platform."""
+        session = db.get_session()
+        try:
+            latest = session.query(Post).order_by(Post.posted_at.desc()).first()
+
+            if latest and latest.posted_at:
+                return (datetime.utcnow() - latest.posted_at).days
+
+            return None
+        finally:
+            session.close()
+
+    def _was_reminder_sent_recently(self, reminder_type: str, hours: int = 12) -> bool:
+        """Check if a reminder was sent in the last N hours."""
+        session = db.get_session()
+        try:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            recent = session.query(ReminderLog).filter(
+                ReminderLog.reminder_type == reminder_type,
+                ReminderLog.sent_at >= cutoff
+            ).first()
+
+            return recent is not None
+        finally:
+            session.close()
+
+    def _log_reminder(self, reminder_type: str, message: str):
+        """Log a sent reminder to prevent spam."""
+        session = db.get_session()
+        try:
+            log = ReminderLog(
+                reminder_type=reminder_type,
+                message=message,
+            )
+            session.add(log)
+            session.commit()
+        finally:
+            session.close()
 
     def start(self):
         """Start the scheduler."""

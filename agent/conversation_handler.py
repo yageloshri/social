@@ -15,7 +15,7 @@ from anthropic import Anthropic
 
 from .config import config
 from .database import db, Idea, Trend, Post, Conversation, UserPreference
-from .skills import IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner
+from .skills import IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner, ProfileScanner
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ class ConversationHandler:
         self.trend_radar = TrendRadar()
         self.memory_core = MemoryCore()
         self.feedback_learner = FeedbackLearner()
+        self.profile_scanner = ProfileScanner()
 
         # Track last sent idea for feedback
         self.last_idea_id: Optional[int] = None
@@ -48,6 +49,8 @@ class ConversationHandler:
             "idea": ["רעיון", "idea", "תן רעיון", "רעיון חדש", "תן לי רעיון", "מה לעשות"],
             "trends": ["טרנדים", "trends", "טרנד", "מה חם", "מה קורה"],
             "rss": ["חדשות", "rss", "כותרות", "news", "עדכונים"],
+            "scraper": ["סקרייפר", "scraper", "סריקה", "בדיקת סריקה"],
+            "full_status": ["סטטוס מלא", "full status", "הכל", "כל הסטטוס"],
             "liked": ["אהבתי", "liked", "טוב", "מעולה", "👍", "❤️", "🔥", "אחלה"],
             "disliked": ["לא אהבתי", "disliked", "לא טוב", "👎", "לא מתאים", "לא בשבילי"],
             "status": ["סטטוס", "status", "איך אני", "סיכום", "ביצועים", "נתונים"],
@@ -153,6 +156,10 @@ class ConversationHandler:
             return await self._cmd_trends()
         elif command == "rss":
             return await self._cmd_rss()
+        elif command == "scraper":
+            return await self._cmd_scraper()
+        elif command == "full_status":
+            return await self._cmd_full_status()
         elif command == "liked":
             return await self._cmd_liked()
         elif command == "disliked":
@@ -279,6 +286,137 @@ class ConversationHandler:
             logger.error(f"Error getting RSS headlines: {e}")
             return "לא הצלחתי למשוך כותרות כרגע 🙏"
 
+    async def _cmd_scraper(self) -> str:
+        """Get scraper verification status."""
+        try:
+            # Get scraper status
+            scraper_status = await self.profile_scanner.get_scraper_status()
+
+            # Get latest posts
+            latest_posts = await self.profile_scanner.get_latest_posts_summary(limit=3)
+
+            response = "📊 *סטטוס סקרייפר:*\n\n"
+
+            # Last scan times
+            response += "🕐 *סריקה אחרונה:*\n"
+            for platform in ["instagram", "tiktok"]:
+                status_data = scraper_status.get(platform, {})
+                last_scan = status_data.get("last_scan")
+                status = status_data.get("status", "unknown")
+
+                status_emoji = "✅" if status == "working" else ("❌" if status == "failed" else "❓")
+
+                if last_scan:
+                    hours_ago = (datetime.utcnow() - last_scan).total_seconds() / 3600
+                    if hours_ago < 1:
+                        time_str = f"לפני {int(hours_ago * 60)} דקות"
+                    elif hours_ago < 24:
+                        time_str = f"לפני {int(hours_ago)} שעות"
+                    else:
+                        time_str = f"לפני {int(hours_ago / 24)} ימים"
+                    response += f"• {platform.title()}: {time_str} {status_emoji}\n"
+                else:
+                    response += f"• {platform.title()}: לא נסרק עדיין {status_emoji}\n"
+
+            response += "\n"
+
+            # Instagram posts
+            if latest_posts.get("instagram"):
+                response += "📱 *Instagram (אחרונים):*\n"
+                for i, post in enumerate(latest_posts["instagram"], 1):
+                    posted = post.get("posted_at")
+                    if posted:
+                        days_ago = (datetime.utcnow() - posted).days
+                        time_str = "אתמול" if days_ago == 1 else (f"לפני {days_ago} ימים" if days_ago > 0 else "היום")
+                    else:
+                        time_str = "?"
+                    caption = post.get("caption", "")[:30]
+                    likes = self._format_number(post.get("likes", 0))
+                    comments = post.get("comments", 0)
+                    response += f"{i}. [{time_str}] '{caption}' - ❤️ {likes} 💬 {comments}\n"
+                response += "\n"
+
+            # TikTok posts
+            if latest_posts.get("tiktok"):
+                response += "📱 *TikTok (אחרונים):*\n"
+                for i, post in enumerate(latest_posts["tiktok"], 1):
+                    posted = post.get("posted_at")
+                    if posted:
+                        days_ago = (datetime.utcnow() - posted).days
+                        time_str = "אתמול" if days_ago == 1 else (f"לפני {days_ago} ימים" if days_ago > 0 else "היום")
+                    else:
+                        time_str = "?"
+                    caption = post.get("caption", "")[:30]
+                    views = self._format_number(post.get("views", 0))
+                    likes = self._format_number(post.get("likes", 0))
+                    response += f"{i}. [{time_str}] '{caption}' - 👁️ {views} ❤️ {likes}\n"
+                response += "\n"
+
+            # Database stats
+            total_posts = scraper_status.get("total_posts", 0)
+            avg_engagement = scraper_status.get("avg_engagement", 0)
+            response += f"📈 *במערכת:* {total_posts} פוסטים | ממוצע engagement: {avg_engagement:.1f}%"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting scraper status: {e}")
+            return "לא הצלחתי לשלוף סטטוס סקרייפר כרגע 🙏"
+
+    async def _cmd_full_status(self) -> str:
+        """Get comprehensive full status."""
+        try:
+            # Get all components status
+            scraper_status = await self.profile_scanner.get_scraper_status()
+            days_since_post = await self.profile_scanner.get_days_since_last_post()
+            rss_result = await self.trend_radar.get_rss_headlines(limit=5)
+            learning = await self.feedback_learner.get_learning_summary()
+
+            response = "🔍 *סטטוס מלא:*\n\n"
+
+            # Scraper health
+            response += "📊 *סקרייפר:*\n"
+            for platform in ["instagram", "tiktok"]:
+                status = scraper_status.get(platform, {}).get("status", "unknown")
+                emoji = "✅" if status == "working" else ("❌" if status == "failed" else "❓")
+                response += f"• {platform.title()}: {emoji}\n"
+            response += "\n"
+
+            # RSS health
+            rss_total = rss_result.get("total", 0)
+            rss_errors = len(rss_result.get("errors", []))
+            rss_status = "✅" if rss_total > 0 and rss_errors < 3 else "❌"
+            response += f"📰 *RSS:* {rss_status} ({rss_total} כותרות)\n\n"
+
+            # Days since last post
+            response += "📅 *ימים מפוסט אחרון:*\n"
+            for platform in ["instagram", "tiktok"]:
+                days = days_since_post.get(platform)
+                if days is not None:
+                    warning = " ⚠️" if days >= 4 else ""
+                    response += f"• {platform.title()}: {days} ימים{warning}\n"
+                else:
+                    response += f"• {platform.title()}: אין נתונים\n"
+            response += "\n"
+
+            # Learning stats
+            response += "🧠 *למידה:*\n"
+            response += f"• דפוסי הצלחה: {learning.get('patterns_learned', 0)}\n"
+            response += f"• העדפות: {learning.get('preferences_learned', 0)}\n"
+            response += f"• דירוג ממוצע: {learning.get('average_rating', 0):.1f}/5\n"
+            response += f"• שיעור קבלת רעיונות: {learning.get('idea_acceptance_rate', 0):.0f}%\n\n"
+
+            # Database stats
+            total_posts = scraper_status.get("total_posts", 0)
+            avg_engagement = scraper_status.get("avg_engagement", 0)
+            response += f"💾 *מסד נתונים:* {total_posts} פוסטים | {avg_engagement:.1f}% engagement"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting full status: {e}")
+            return "לא הצלחתי לשלוף סטטוס מלא כרגע 🙏"
+
     async def _cmd_liked(self) -> str:
         """Mark last idea as liked."""
         if not self.last_idea_id:
@@ -368,6 +506,8 @@ class ConversationHandler:
 🔥 *"טרנדים"* - מה חם עכשיו (עם ניתוח AI)
 📰 *"חדשות"* - כותרות אחרונות מהעולם
 📊 *"סטטוס"* - איך אתה מבצע השבוע
+🔍 *"סקרייפר"* - בדוק סטטוס סריקה
+📋 *"סטטוס מלא"* - כל הנתונים במקום אחד
 👍 *"אהבתי"* - הרעיון האחרון היה טוב
 👎 *"לא אהבתי"* - הרעיון לא מתאים
 
