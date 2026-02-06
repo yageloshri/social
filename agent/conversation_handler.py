@@ -51,26 +51,47 @@ class ConversationHandler:
         # Track last sent idea for feedback
         self.last_idea_id: Optional[int] = None
 
-        # Command patterns (Hebrew and English)
+        # Command patterns (Hebrew and English) - ORDER MATTERS for multi-word commands!
         self.commands = {
-            "idea": ["רעיון", "idea", "תן רעיון", "רעיון חדש", "תן לי רעיון", "מה לעשות"],
+            # Multi-word commands first (to match before single words)
+            "full_status": ["סטטוס מלא", "full status", "כל הסטטוס"],
+            "disliked": ["לא אהבתי", "לא טוב", "לא מתאים", "לא בשבילי", "disliked"],
+
+            # Ideas & Content
+            "idea": ["רעיון", "idea", "תן רעיון", "רעיון חדש", "תן לי רעיון", "מה לעשות", "רעיון לתוכן"],
+
+            # Trends & News
             "trends": ["טרנדים", "trends", "טרנד", "מה חם", "מה קורה"],
             "rss": ["חדשות", "rss", "כותרות", "news", "עדכונים"],
-            "scraper": ["סקרייפר", "scraper", "סריקה", "בדיקת סריקה"],
-            "full_status": ["סטטוס מלא", "full status", "הכל", "כל הסטטוס"],
-            "liked": ["אהבתי", "liked", "טוב", "מעולה", "👍", "❤️", "🔥", "אחלה"],
-            "disliked": ["לא אהבתי", "disliked", "לא טוב", "👎", "לא מתאים", "לא בשבילי"],
-            "status": ["סטטוס", "status", "איך אני", "סיכום", "נתונים"],
-            "performance": ["ביצועים", "performance", "איך הולך"],
-            "series": ["סדרות", "series", "סדרה"],
+
+            # Performance & Analytics
+            "performance": ["ביצועים", "performance", "איך הולך", "איך הסרטונים"],
             "report": ["דוח", "report", "דוח שבועי"],
-            "compare": ["השוואה", "compare", "השוואה לחודש"],
-            "help": ["עזרה", "help", "פקודות", "מה אפשר"],
+            "compare": ["השוואה", "compare", "השוואה חודשית"],
+            "series": ["סדרות", "series", "סדרה"],
+            "status": ["סטטוס", "status", "איך אני", "סיכום", "נתונים"],
+
+            # System
+            "scraper": ["סקרייפר", "scraper", "סריקה", "בדיקת סריקה"],
+            "schedule": ["לוח זמנים", "schedule", "מתי", "שעות"],
+
+            # Feedback
+            "liked": ["אהבתי", "liked", "טוב", "מעולה", "אחלה"],
+            "more": ["רעיון אחר", "more", "עוד רעיון", "עוד"],
+
+            # Help
+            "help": ["עזרה", "help", "פקודות", "מה אפשר", "?"],
         }
 
     async def process_message(self, message: str, from_number: str) -> str:
         """
         Process an incoming message and return a response.
+
+        Priority order:
+        1. Commands (רעיון, טרנדים, דוח, etc.)
+        2. Golden moment responses (בוצע, לא מעוניין, אחר כך)
+        3. Preference statements (אני אוהב..., אני לא אוהב...)
+        4. Natural conversation (Claude)
 
         Args:
             message: The incoming message text
@@ -85,24 +106,28 @@ class ConversationHandler:
         # Clean and normalize message
         message_lower = message.lower().strip()
 
-        # Check for golden moment responses first (בוצע, עוד, לא מעוניין, אחר כך)
-        golden_response = await self.golden_moment_detector.handle_response(message)
-        if golden_response:
-            response = golden_response
-        else:
-            # Check for commands
-            command = self._detect_command(message_lower)
+        response = None
 
-            if command:
-                response = await self._handle_command(command, message)
-            else:
-                # Check for preference statements
-                preference = self._detect_preference(message)
-                if preference:
-                    response = await self._handle_preference(preference, message)
-                else:
-                    # Natural conversation
-                    response = await self._handle_conversation(message)
+        # 1. Check for commands FIRST
+        command = self._detect_command(message_lower)
+        if command:
+            response = await self._handle_command(command, message)
+
+        # 2. Check for golden moment responses (only if not a command)
+        if not response:
+            golden_response = await self.golden_moment_detector.handle_response(message)
+            if golden_response:
+                response = golden_response
+
+        # 3. Check for preference statements
+        if not response:
+            preference = self._detect_preference(message)
+            if preference:
+                response = await self._handle_preference(preference, message)
+
+        # 4. Natural conversation with Claude
+        if not response:
+            response = await self._handle_conversation(message)
 
         # Store the response
         await self._store_conversation(response, from_number, "outgoing")
@@ -190,6 +215,10 @@ class ConversationHandler:
             return await self._cmd_report()
         elif command == "compare":
             return await self._cmd_compare()
+        elif command == "schedule":
+            return await self._cmd_schedule()
+        elif command == "more":
+            return await self._cmd_more()
         elif command == "help":
             return await self._cmd_help()
         else:
@@ -526,18 +555,29 @@ class ConversationHandler:
         """Show available commands."""
         return """🤖 *הפקודות שלי:*
 
-💡 *"רעיון"* - קבל רעיון לתוכן חדש
-🔥 *"טרנדים"* - מה חם עכשיו (עם ניתוח AI)
-📰 *"חדשות"* - כותרות אחרונות מהעולם
-📊 *"סטטוס"* - איך אתה מבצע השבוע
-🚀 *"ביצועים"* - ביצועי הפוסטים האחרונים
-📺 *"סדרות"* - סדרות תוכן פעילות ופוטנציאליות
-📋 *"דוח"* - דוח שבועי מלא
-📈 *"השוואה"* - השוואה לשבועות קודמים
-🔍 *"סקרייפר"* - בדוק סטטוס סריקה
-📋 *"סטטוס מלא"* - כל הנתונים במקום אחד
-👍 *"אהבתי"* - הרעיון האחרון היה טוב
-👎 *"לא אהבתי"* - הרעיון לא מתאים
+💡 *רעיונות:*
+• *"רעיון"* - קבל רעיון לתוכן חדש
+• *"עוד"* - רעיון אחר
+
+🔥 *טרנדים:*
+• *"טרנדים"* - מה חם עכשיו (עם ניתוח AI)
+• *"חדשות"* - כותרות אחרונות מהעולם
+
+📊 *ביצועים:*
+• *"סטטוס"* - איך אתה מבצע השבוע
+• *"ביצועים"* - ביצועי הפוסטים האחרונים
+• *"דוח"* - דוח שבועי מלא
+• *"השוואה"* - השוואה לשבועות קודמים
+• *"סדרות"* - סדרות תוכן פעילות
+
+⚙️ *מערכת:*
+• *"סקרייפר"* - בדוק סטטוס סריקה
+• *"סטטוס מלא"* - כל הנתונים במקום אחד
+• *"לוח זמנים"* - מתי אני שולח הודעות
+
+👍 *משוב:*
+• *"אהבתי"* - הרעיון האחרון היה טוב
+• *"לא אהבתי"* - הרעיון לא מתאים
 
 🚨 *תגובות ל"רגע זהב":*
 • *"בוצע"* - השתמשתי ברעיון
@@ -546,10 +586,7 @@ class ConversationHandler:
 • *"אחר כך"* - תזכיר לי בעוד שעה
 
 💬 *טיפ:* אתה יכול גם לדבר איתי חופשי!
-למשל:
-• "אני לא אוהב סטורי טיימס"
-• "תן לי יותר רעיונות עם זוהר"
-• "מה דעתך על תוכן מוזיקלי?"
+למשל: "אני לא אוהב סטורי טיימס"
 
 אני לומד מכל שיחה ומשתפר! 🧠"""
 
@@ -660,6 +697,71 @@ class ConversationHandler:
         except Exception as e:
             logger.error(f"Error generating comparison: {e}")
             return "לא הצלחתי לייצר השוואה כרגע 🙏"
+
+    async def _cmd_schedule(self) -> str:
+        """Show message schedule."""
+        return """📅 *לוח הזמנים שלי:*
+
+🌅 *06:00* - סריקת בוקר (ניתוח, למידה, רעיונות)
+☀️ *09:00* - הודעת בוקר עם רעיונות
+🌤️ *12:00* - בדיקת טרנדים
+🕐 *13:00* - עדכון אם יש טרנד חם
+🌆 *17:00* - תזכורת אחה"צ
+🌙 *21:00* - הודעת ערב עם סיכום
+
+⏰ *בדיקות אוטומטיות:*
+• רגע זהב: כל 30 דקות (16:00-21:00)
+• ויראליות: כל שעה
+• תזכורת פוסט: כל 6 שעות
+
+📋 *דוחות:*
+• דוח שבועי: יום שישי 18:00
+• סריקת סדרות: שבת 20:00
+
+💡 אתה יכול לשלוח לי הודעה מתי שתרצה!"""
+
+    async def _cmd_more(self) -> str:
+        """Generate another idea (different from last one)."""
+        try:
+            # Get user preferences to consider
+            preferences = await self._get_user_preferences()
+
+            # Generate new idea
+            result = await self.idea_engine.execute(count=1)
+            ideas = result.get("ideas", [])
+
+            if not ideas:
+                return "לא הצלחתי לייצר רעיון כרגע, נסה שוב בעוד רגע 🙏"
+
+            idea = ideas[0]
+            self.last_idea_id = idea.get("id")
+
+            # Format response
+            response = f"""💡 *רעיון אחר!*
+
+*{idea.get('title', 'רעיון')}*
+
+🎬 *פתיחה:*
+"{idea.get('hook', '')}"
+
+📝 *מה לעשות:*
+{self._format_steps(idea.get('steps', []))}
+
+⏱️ אורך: {idea.get('duration', '30-60 שניות')}
+⏰ זמן מומלץ: {idea.get('best_time', '18:00-20:00')}
+📊 צפי: {self._translate_performance(idea.get('predicted_performance', 'medium'))}
+
+{self._format_hashtags(idea.get('hashtags', []))}
+
+---
+אהבת? שלח "אהבתי" 👍
+עוד רעיון? שלח "עוד" 🔄"""
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error generating another idea: {e}")
+            return "אופס, משהו השתבש. נסה שוב 🙏"
 
     async def _handle_preference(self, preference: Dict, original_message: str) -> str:
         """Handle a preference statement and learn from it."""

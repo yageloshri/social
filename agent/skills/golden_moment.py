@@ -388,7 +388,7 @@ class GoldenMomentDetector(BaseSkill):
         finally:
             session.close()
 
-    async def handle_response(self, response: str) -> str:
+    async def handle_response(self, response: str) -> Optional[str]:
         """
         Handle user response to a golden moment alert.
 
@@ -396,11 +396,30 @@ class GoldenMomentDetector(BaseSkill):
             response: User's response text
 
         Returns:
-            Reply message
+            Reply message, or None if not a golden moment response
         """
         response_lower = response.lower().strip()
 
-        # Get the most recent alert
+        # FIRST: Check if message matches any golden moment keyword
+        # If not, return None immediately without touching the database
+        golden_keywords = {
+            "used": ["בוצע", "עשיתי", "השתמשתי", "פרסמתי", "done", "used"],
+            "more": ["עוד", "אחר", "רעיון אחר"],
+            "not_interested": ["לא מעוניין", "דלג", "לא רלוונטי", "skip"],
+            "later": ["אחר כך", "מאוחר יותר", "בעוד שעה", "later"],
+        }
+
+        matched_type = None
+        for response_type, keywords in golden_keywords.items():
+            if any(word in response_lower for word in keywords):
+                matched_type = response_type
+                break
+
+        # Not a golden moment response - return None to let other handlers process it
+        if not matched_type:
+            return None
+
+        # Get the most recent alert (only if we matched a keyword)
         session = db.get_session()
         try:
             recent_alert = session.query(GoldenMomentAlert).order_by(
@@ -408,26 +427,22 @@ class GoldenMomentDetector(BaseSkill):
             ).first()
 
             if not recent_alert:
-                return "אין התראה פעילה כרגע"
+                return "אין התראת 'רגע זהב' פעילה כרגע 🤷‍♂️\n\nשלח 'רעיון' לקבל רעיון לתוכן חדש!"
 
-            # Handle different responses
-            if any(word in response_lower for word in ["בוצע", "עשיתי", "השתמשתי", "פרסמתי"]):
+            # Handle based on matched type
+            if matched_type == "used":
                 return await self._handle_used_response(session, recent_alert)
-
-            elif any(word in response_lower for word in ["עוד", "אחר", "רעיון אחר"]):
+            elif matched_type == "more":
                 return await self._handle_more_response(session, recent_alert)
-
-            elif any(word in response_lower for word in ["לא מעוניין", "דלג", "לא רלוונטי"]):
+            elif matched_type == "not_interested":
                 return await self._handle_not_interested_response(session, recent_alert)
-
-            elif any(word in response_lower for word in ["אחר כך", "מאוחר יותר", "בעוד שעה"]):
+            elif matched_type == "later":
                 return await self._handle_remind_later_response(session, recent_alert)
-
-            else:
-                return None  # Not a golden moment response
 
         finally:
             session.close()
+
+        return None
 
     async def _handle_used_response(self, session, alert: GoldenMomentAlert) -> str:
         """Mark alert as used and update learning."""
