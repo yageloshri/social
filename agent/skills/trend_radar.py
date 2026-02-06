@@ -39,7 +39,8 @@ class TrendRadar(BaseSkill):
     async def execute(
         self,
         check_all_feeds: bool = True,
-        max_trends: int = 20
+        max_trends: int = 20,
+        priority_only: bool = False
     ) -> Dict[str, Any]:
         """
         Execute trend monitoring.
@@ -47,6 +48,7 @@ class TrendRadar(BaseSkill):
         Args:
             check_all_feeds: If True, check all configured feeds
             max_trends: Maximum number of trends to return
+            priority_only: If True, only check breaking and entertainment feeds
 
         Returns:
             Dict with discovered trends
@@ -58,21 +60,37 @@ class TrendRadar(BaseSkill):
             "relevant_trends": [],
             "content_opportunities": [],
             "errors": [],
+            "feeds_checked": [],
         }
 
         try:
             all_entries = []
 
-            # Fetch all RSS feeds
-            feeds_to_check = config.rss.news_feeds + config.rss.entertainment_feeds
+            # Build feed list based on priority
+            if priority_only:
+                # Quick scan - only breaking news and entertainment
+                feeds_to_check = [
+                    ("breaking", config.rss.breaking_feeds),
+                    ("entertainment", config.rss.entertainment_feeds),
+                ]
+            else:
+                # Full scan - all feeds by priority
+                feeds_to_check = [
+                    ("breaking", config.rss.breaking_feeds),
+                    ("entertainment", config.rss.entertainment_feeds),
+                    ("lifestyle", config.rss.lifestyle_feeds),
+                    ("music", config.rss.music_feeds),
+                ]
 
-            for feed_url in feeds_to_check:
-                try:
-                    entries = await self._fetch_feed(feed_url)
-                    all_entries.extend(entries)
-                except Exception as e:
-                    logger.warning(f"Error fetching feed {feed_url}: {e}")
-                    results["errors"].append(f"Feed error: {feed_url}")
+            for feed_category, feed_urls in feeds_to_check:
+                results["feeds_checked"].append(feed_category)
+                for feed_url in feed_urls:
+                    try:
+                        entries = await self._fetch_feed(feed_url, feed_category)
+                        all_entries.extend(entries)
+                    except Exception as e:
+                        logger.warning(f"Error fetching feed {feed_url}: {e}")
+                        results["errors"].append(f"Feed error: {feed_url}")
 
             # Filter and score entries
             relevant_entries = self._filter_entries(all_entries)
@@ -111,12 +129,13 @@ class TrendRadar(BaseSkill):
 
         return results
 
-    async def _fetch_feed(self, feed_url: str) -> List[Dict]:
+    async def _fetch_feed(self, feed_url: str, category: str = "general") -> List[Dict]:
         """
         Fetch and parse an RSS feed.
 
         Args:
             feed_url: URL of the RSS feed
+            category: Feed category (breaking, entertainment, lifestyle, music)
 
         Returns:
             List of feed entries
@@ -142,6 +161,7 @@ class TrendRadar(BaseSkill):
                 "source": feed.feed.get("title", feed_url),
                 "source_url": feed_url,
                 "published": published,
+                "feed_category": category,
             })
 
         return entries
@@ -201,6 +221,16 @@ class TrendRadar(BaseSkill):
             score += high_matches * 20
             score += medium_matches * 10
 
+            # Feed category bonus (entertainment & lifestyle more relevant)
+            category_bonuses = {
+                "entertainment": 25,  # Most relevant for content creator
+                "lifestyle": 20,      # Relationship/lifestyle content
+                "music": 15,          # Relevant for musician
+                "breaking": 10,       # Timely but less directly relevant
+            }
+            category = entry.get("feed_category", "general")
+            score += category_bonuses.get(category, 5)
+
             # Recency bonus
             published = entry.get("published")
             if published:
@@ -218,9 +248,14 @@ class TrendRadar(BaseSkill):
                 entry["urgency"] = "today"
 
             # Entertainment/celebrity bonus (more relevant for content)
-            entertainment_keywords = ["סלבס", "כוכב", "סדרה", "תוכנית", "ריאליטי", "שיר"]
+            entertainment_keywords = ["סלבס", "כוכב", "סדרה", "תוכנית", "ריאליטי", "שיר", "זמר", "קליפ"]
             if any(kw in entry["title"].lower() for kw in entertainment_keywords):
                 score += 15
+
+            # Relationship/couple content bonus (creator's strongest format)
+            couple_keywords = ["זוגיות", "זוג", "מערכת יחסים", "התחתנו", "נפרדו", "גרים ביחד"]
+            if any(kw in entry["title"].lower() for kw in couple_keywords):
+                score += 25
 
             entry["relevance_score"] = min(score, 100)  # Cap at 100
 
@@ -358,7 +393,7 @@ If this trend is NOT suitable for their audience/style, respond with: "לא רל
         Returns:
             List of immediate opportunity trends
         """
-        results = await self.execute(max_trends=5)
+        results = await self.execute(max_trends=5, priority_only=True)
 
         immediate = [
             t for t in results.get("relevant_trends", [])
@@ -366,3 +401,77 @@ If this trend is NOT suitable for their audience/style, respond with: "לא רל
         ]
 
         return immediate
+
+    async def get_rss_headlines(self, category: str = "all", limit: int = 10) -> Dict[str, Any]:
+        """
+        Get latest RSS headlines for display - without AI analysis.
+        Fast method for conversation handler.
+
+        Args:
+            category: "all", "entertainment", "breaking", "lifestyle", or "music"
+            limit: Maximum headlines to return
+
+        Returns:
+            Dict with headlines by category
+        """
+        results = {
+            "headlines": [],
+            "by_category": {},
+            "total": 0,
+            "errors": [],
+        }
+
+        # Determine which feeds to check
+        feeds_map = {
+            "breaking": config.rss.breaking_feeds,
+            "entertainment": config.rss.entertainment_feeds,
+            "lifestyle": config.rss.lifestyle_feeds,
+            "music": config.rss.music_feeds,
+        }
+
+        if category == "all":
+            feeds_to_check = [
+                ("entertainment", feeds_map["entertainment"]),  # Most relevant first
+                ("breaking", feeds_map["breaking"]),
+                ("lifestyle", feeds_map["lifestyle"]),
+                ("music", feeds_map["music"]),
+            ]
+        elif category in feeds_map:
+            feeds_to_check = [(category, feeds_map[category])]
+        else:
+            results["errors"].append(f"Unknown category: {category}")
+            return results
+
+        all_entries = []
+
+        for cat_name, feed_urls in feeds_to_check:
+            category_entries = []
+            for feed_url in feed_urls:
+                try:
+                    entries = await self._fetch_feed(feed_url, cat_name)
+                    category_entries.extend(entries)
+                except Exception as e:
+                    logger.warning(f"Error fetching feed {feed_url}: {e}")
+                    results["errors"].append(f"Feed error: {feed_url}")
+
+            # Filter out excluded keywords
+            filtered = []
+            for entry in category_entries:
+                text = f"{entry['title']} {entry['summary']}".lower()
+                has_excluded = any(kw in text for kw in config.rss.exclude_keywords)
+                if not has_excluded:
+                    filtered.append(entry)
+
+            results["by_category"][cat_name] = filtered[:5]  # Top 5 per category
+            all_entries.extend(filtered)
+
+        # Sort all by recency
+        all_entries.sort(
+            key=lambda x: x.get("published") or datetime.min,
+            reverse=True
+        )
+
+        results["headlines"] = all_entries[:limit]
+        results["total"] = len(all_entries)
+
+        return results

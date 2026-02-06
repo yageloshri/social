@@ -46,7 +46,8 @@ class ConversationHandler:
         # Command patterns (Hebrew and English)
         self.commands = {
             "idea": ["רעיון", "idea", "תן רעיון", "רעיון חדש", "תן לי רעיון", "מה לעשות"],
-            "trends": ["טרנדים", "trends", "טרנד", "מה חם", "מה קורה", "חדשות"],
+            "trends": ["טרנדים", "trends", "טרנד", "מה חם", "מה קורה"],
+            "rss": ["חדשות", "rss", "כותרות", "news", "עדכונים"],
             "liked": ["אהבתי", "liked", "טוב", "מעולה", "👍", "❤️", "🔥", "אחלה"],
             "disliked": ["לא אהבתי", "disliked", "לא טוב", "👎", "לא מתאים", "לא בשבילי"],
             "status": ["סטטוס", "status", "איך אני", "סיכום", "ביצועים", "נתונים"],
@@ -150,6 +151,8 @@ class ConversationHandler:
             return await self._cmd_idea()
         elif command == "trends":
             return await self._cmd_trends()
+        elif command == "rss":
+            return await self._cmd_rss()
         elif command == "liked":
             return await self._cmd_liked()
         elif command == "disliked":
@@ -205,7 +208,7 @@ class ConversationHandler:
             return "אופס, משהו השתבש. נסה שוב 🙏"
 
     async def _cmd_trends(self) -> str:
-        """Get current trending topics."""
+        """Get current trending topics (with AI analysis)."""
         try:
             result = await self.trend_radar.execute(max_trends=5)
             trends = result.get("relevant_trends", [])
@@ -229,6 +232,52 @@ class ConversationHandler:
         except Exception as e:
             logger.error(f"Error getting trends: {e}")
             return "לא הצלחתי לבדוק טרנדים כרגע 🙏"
+
+    async def _cmd_rss(self) -> str:
+        """Get latest RSS headlines (fast, no AI analysis)."""
+        try:
+            result = await self.trend_radar.get_rss_headlines(limit=10)
+            headlines = result.get("headlines", [])
+            by_category = result.get("by_category", {})
+
+            if not headlines:
+                return "לא הצלחתי למשוך כותרות כרגע 🤷‍♂️\nנסה שוב בעוד רגע!"
+
+            response = "📰 *כותרות אחרונות:*\n\n"
+
+            # Show by category for better organization
+            category_emoji = {
+                "entertainment": "🎬",
+                "breaking": "🔴",
+                "lifestyle": "💫",
+                "music": "🎵",
+            }
+            category_name = {
+                "entertainment": "בידור",
+                "breaking": "חדשות",
+                "lifestyle": "סגנון חיים",
+                "music": "מוזיקה",
+            }
+
+            for cat, entries in by_category.items():
+                if entries:
+                    emoji = category_emoji.get(cat, "📌")
+                    name = category_name.get(cat, cat)
+                    response += f"{emoji} *{name}:*\n"
+                    for entry in entries[:3]:  # Top 3 per category
+                        title = entry.get("title", "")[:60]
+                        if len(entry.get("title", "")) > 60:
+                            title += "..."
+                        response += f"• {title}\n"
+                    response += "\n"
+
+            response += "---\n💡 שלח 'טרנדים' לניתוח AI מה רלוונטי לך!"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting RSS headlines: {e}")
+            return "לא הצלחתי למשוך כותרות כרגע 🙏"
 
     async def _cmd_liked(self) -> str:
         """Mark last idea as liked."""
@@ -316,7 +365,8 @@ class ConversationHandler:
         return """🤖 *הפקודות שלי:*
 
 💡 *"רעיון"* - קבל רעיון לתוכן חדש
-🔥 *"טרנדים"* - מה חם עכשיו
+🔥 *"טרנדים"* - מה חם עכשיו (עם ניתוח AI)
+📰 *"חדשות"* - כותרות אחרונות מהעולם
 📊 *"סטטוס"* - איך אתה מבצע השבוע
 👍 *"אהבתי"* - הרעיון האחרון היה טוב
 👎 *"לא אהבתי"* - הרעיון לא מתאים

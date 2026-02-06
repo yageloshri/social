@@ -94,35 +94,71 @@ class ScheduleConfig:
 class RSSConfig:
     """RSS feed configuration for trend monitoring."""
 
-    # Israeli news sources
-    news_feeds: List[str] = field(default_factory=lambda: [
-        "https://www.ynet.co.il/Integration/StoryRss2.xml",
-        "https://rss.walla.co.il/feed/1",
-        "https://www.mako.co.il/rss/31750a2610f26110VgnVCM1000004801000aRCRD.xml",
+    # Priority 1: Breaking news (check most frequently)
+    breaking_feeds: List[str] = field(default_factory=lambda: [
+        "https://www.ynet.co.il/Integration/StoryRss2.xml",           # Ynet main
+        "https://rss.walla.co.il/feed/1",                              # Walla main
+        "https://www.mako.co.il/rss/31750a2610f26110VgnVCM1000004801000aRCRD.xml",  # Mako news
     ])
 
-    # Entertainment feeds
+    # Priority 2: Entertainment & Celebrities (most relevant for content)
     entertainment_feeds: List[str] = field(default_factory=lambda: [
-        "https://www.mako.co.il/rss/5b0bce5191f7f110VgnVCM2000002a0c10acRCRD.xml",  # Celebs
-        "https://rss.walla.co.il/feed/22",  # Culture
+        "https://www.mako.co.il/rss/5b0bce5191f7f110VgnVCM2000002a0c10acRCRD.xml",  # Mako Celebs
+        "https://rss.walla.co.il/feed/22",                             # Walla Culture
+        "https://rss.walla.co.il/feed/24",                             # Walla Celebs
+        "https://www.ynet.co.il/Integration/StoryRss24.xml",           # Ynet Celebrities
+        "https://www.ice.co.il/rss.xml",                               # ICE (entertainment)
+        "https://www.geektime.co.il/feed/",                            # Geektime (tech/viral)
     ])
 
-    # High priority keywords (Hebrew)
+    # Priority 3: Lifestyle & Relationships
+    lifestyle_feeds: List[str] = field(default_factory=lambda: [
+        "https://www.mako.co.il/rss/b9b67c8a91f7f110VgnVCM2000002a0c10acRCRD.xml",  # Mako Lifestyle
+        "https://rss.walla.co.il/feed/4",                              # Walla Fashion/Style
+        "https://www.ynet.co.il/Integration/StoryRss3104.xml",         # Ynet Relationships
+    ])
+
+    # Priority 4: Music & Culture
+    music_feeds: List[str] = field(default_factory=lambda: [
+        "https://www.mako.co.il/rss/music.xml",                        # Mako Music
+        "https://rss.walla.co.il/feed/3",                              # Walla Music
+    ])
+
+    # High priority keywords (Hebrew) - instant alert
     high_priority_keywords: List[str] = field(default_factory=lambda: [
-        "זוגיות", "מערכת יחסים", "גרים ביחד", "ויראלי",
-        "טיקטוק", "אינסטגרם", "מוזיקאי", "שיר", "להיט"
+        # Relationship content
+        "זוגיות", "מערכת יחסים", "גרים ביחד", "התחתנו", "נפרדו", "זוג",
+        # Viral/social
+        "ויראלי", "טיקטוק", "אינסטגרם", "רילס", "טרנד",
+        # Music
+        "מוזיקאי", "שיר חדש", "להיט", "קליפ", "זמר", "זמרת",
+        # Celebrities
+        "סלב", "כוכב", "מפורסם",
     ])
 
-    # Medium priority keywords
+    # Medium priority keywords - daily digest
     medium_priority_keywords: List[str] = field(default_factory=lambda: [
-        "צעירים", "טרנד", "ריאליטי", "הישרדות", "האח הגדול",
-        "כוכב נולד", "פופולרי"
+        # Reality TV
+        "ריאליטי", "הישרדות", "האח הגדול", "כוכב נולד", "רוקדים עם כוכבים",
+        # Youth culture
+        "צעירים", "דור Z", "מתבגרים",
+        # Entertainment
+        "בידור", "פופולרי", "חדשות הבידור",
+        # Lifestyle
+        "סגנון חיים", "אופנה", "יופי",
     ])
 
-    # Keywords to exclude
+    # Keywords to exclude completely
     exclude_keywords: List[str] = field(default_factory=lambda: [
-        "פוליטיקה", "מלחמה", "טרור", "אסון", "תאונה", "מוות",
-        "פיגוע", "צבא", "ממשלה", "כנסת"
+        # Politics & War
+        "פוליטיקה", "מלחמה", "טרור", "פיגוע", "צבא", "ממשלה", "כנסת",
+        "חמאס", "חיזבאללה", "עזה", "לבנון",
+        # Tragic events
+        "אסון", "תאונה", "מוות", "נרצח", "נהרג", "אבל",
+        # Economics
+        "כלכלה", "שוק ההון", "מניות", "דולר",
+        # Crime
+        "פשע", "רצח", "שוד", "משטרה",
     ])
 
 
