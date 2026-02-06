@@ -46,11 +46,8 @@ def whatsapp_webhook():
 
         logger.info(f"Incoming WhatsApp: '{incoming_msg}' from {from_number}")
 
-        # Verify it's from our user
-        expected_number = config.twilio.my_number
-        if expected_number and from_number != expected_number:
-            logger.warning(f"Message from unknown number: {from_number}")
-            return Response(status=403)
+        # No number validation - single user system
+        # All messages are accepted and processed
 
         # Initialize handler if needed
         handler = init_conversation_handler()
