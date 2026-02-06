@@ -1,8 +1,10 @@
 """
 Scheduler
 =========
-Manages scheduled tasks for the Content Master Agent.
+Manages scheduled tasks for the Autonomous Content Agent.
 Uses APScheduler for reliable cron-like scheduling.
+
+NEW: Integrates with AutonomousAgent for brain-driven decision making.
 """
 
 import asyncio
@@ -30,17 +32,22 @@ ISRAEL_TZ = pytz.timezone("Asia/Jerusalem")
 
 class AgentScheduler:
     """
-    Manages all scheduled tasks for the agent.
+    Manages all scheduled tasks for the autonomous agent.
 
-    Schedule:
-    - 06:00: Morning routine (full scan, analysis, idea generation)
-    - 09:00: Send morning message
-    - 12:00: Quick update
-    - 13:00: Send midday message (if trends)
-    - 17:00: Send afternoon reminder
-    - 18:00: Quick update
-    - 21:00: Send evening message
-    - 00:00: Quick update
+    NEW AUTONOMOUS SCHEDULE:
+    - Every 30 min: Brain thinking cycle (decides what to do)
+    - 08:00: Morning routine (scan, analyze, plan)
+    - 22:00: Evening reflection (analyze day, plan tomorrow)
+    - 03:00: Learn communication patterns
+    - Sunday 10:00: Weekly strategy session
+    - Sunday 00:00: Reset weekly counters
+    - 00:00: Reset daily counters
+
+    LEGACY SCHEDULE (still active):
+    - Golden moment checks (prime time)
+    - Virality checks (hourly)
+    - Series scans (Saturday)
+    - Weekly reports (Friday)
     """
 
     def __init__(self):
@@ -49,89 +56,109 @@ class AgentScheduler:
         self.virality_predictor = ViralityPredictor()
         self.series_detector = SeriesDetector()
         self.weekly_reporter = WeeklyReporter()
+
+        # Autonomous agent - lazy load to avoid circular imports
+        self._autonomous_agent = None
+
         self._setup_jobs()
+
+    @property
+    def autonomous_agent(self):
+        """Lazy load autonomous agent."""
+        if self._autonomous_agent is None:
+            from .autonomous import autonomous_agent
+            self._autonomous_agent = autonomous_agent
+        return self._autonomous_agent
 
     def _setup_jobs(self):
         """Set up all scheduled jobs."""
 
-        # Morning routine - 6:00 AM Israel time
+        # ========================================
+        # AUTONOMOUS AGENT JOBS (NEW)
+        # ========================================
+
+        # Brain thinking cycle - every 30 minutes
+        self.scheduler.add_job(
+            self._run_brain_think,
+            IntervalTrigger(minutes=30),
+            id="brain_think",
+            name="Brain Thinking Cycle",
+            replace_existing=True,
+        )
+
+        # Autonomous morning routine - 8:00 AM
+        self.scheduler.add_job(
+            self._run_autonomous_morning,
+            CronTrigger(hour=8, minute=0),
+            id="autonomous_morning",
+            name="Autonomous Morning Routine",
+            replace_existing=True,
+        )
+
+        # Opportunity scanner - every 30 minutes during waking hours
+        self.scheduler.add_job(
+            self._run_opportunity_scan,
+            CronTrigger(hour="8-23", minute="15,45"),
+            id="opportunity_scan",
+            name="Opportunity Scanner",
+            replace_existing=True,
+        )
+
+        # Evening reflection - 22:00
+        self.scheduler.add_job(
+            self._run_evening_reflection,
+            CronTrigger(hour=22, minute=0),
+            id="evening_reflection",
+            name="Evening Reflection",
+            replace_existing=True,
+        )
+
+        # Learn communication patterns - 3:00 AM daily
+        self.scheduler.add_job(
+            self._run_pattern_learning,
+            CronTrigger(hour=3, minute=0),
+            id="pattern_learning",
+            name="Learn Communication Patterns",
+            replace_existing=True,
+        )
+
+        # Weekly strategy session - Sunday 10:00
+        self.scheduler.add_job(
+            self._run_weekly_strategy,
+            CronTrigger(day_of_week="sun", hour=10, minute=0),
+            id="weekly_strategy",
+            name="Weekly Strategy Session",
+            replace_existing=True,
+        )
+
+        # Reset daily counters - midnight
+        self.scheduler.add_job(
+            self._run_daily_reset,
+            CronTrigger(hour=0, minute=0),
+            id="daily_reset",
+            name="Reset Daily Counters",
+            replace_existing=True,
+        )
+
+        # Reset weekly counters - Sunday midnight
+        self.scheduler.add_job(
+            self._run_weekly_reset,
+            CronTrigger(day_of_week="sun", hour=0, minute=5),
+            id="weekly_reset",
+            name="Reset Weekly Counters",
+            replace_existing=True,
+        )
+
+        # ========================================
+        # LEGACY JOBS (Still needed)
+        # ========================================
+
+        # Legacy morning routine - 6:00 AM (for scraping/analysis)
         self.scheduler.add_job(
             self._run_morning_routine,
             CronTrigger(hour=6, minute=0),
             id="morning_routine",
-            name="Morning Routine (scan, analyze, generate ideas)",
-            replace_existing=True,
-        )
-
-        # Morning message - 9:00 AM
-        self.scheduler.add_job(
-            self._run_morning_message,
-            CronTrigger(hour=9, minute=0),
-            id="morning_message",
-            name="Send Morning Message",
-            replace_existing=True,
-        )
-
-        # Midday trend check - 12:00 PM
-        self.scheduler.add_job(
-            self._run_quick_update,
-            CronTrigger(hour=12, minute=0),
-            id="midday_update",
-            name="Midday Quick Update",
-            replace_existing=True,
-        )
-
-        # Midday message - 1:00 PM
-        self.scheduler.add_job(
-            self._run_midday_message,
-            CronTrigger(hour=13, minute=0),
-            id="midday_message",
-            name="Send Midday Message (if trends)",
-            replace_existing=True,
-        )
-
-        # Afternoon message - 5:00 PM
-        self.scheduler.add_job(
-            self._run_afternoon_message,
-            CronTrigger(hour=17, minute=0),
-            id="afternoon_message",
-            name="Send Afternoon Reminder",
-            replace_existing=True,
-        )
-
-        # Evening update - 6:00 PM
-        self.scheduler.add_job(
-            self._run_quick_update,
-            CronTrigger(hour=18, minute=0),
-            id="evening_update",
-            name="Evening Quick Update",
-            replace_existing=True,
-        )
-
-        # Evening message - 9:00 PM
-        self.scheduler.add_job(
-            self._run_evening_message,
-            CronTrigger(hour=21, minute=0),
-            id="evening_message",
-            name="Send Evening Message",
-            replace_existing=True,
-        )
-
-        # Midnight update - 12:00 AM
-        self.scheduler.add_job(
-            self._run_quick_update,
-            CronTrigger(hour=0, minute=0),
-            id="midnight_update",
-            name="Midnight Quick Update",
-            replace_existing=True,
-        )
-
-        # No-post reminder check - every 6 hours
-        self.scheduler.add_job(
-            self._run_no_post_reminder_check,
-            IntervalTrigger(hours=6),
-            id="no_post_reminder",
-            name="No Post Reminder Check",
+            name="Morning Routine (scan, analyze)",
             replace_existing=True,
         )
 
@@ -156,7 +183,7 @@ class AgentScheduler:
         # Golden Moment weekly learning - Sunday at midnight
         self.scheduler.add_job(
             self._run_golden_moment_learning,
-            CronTrigger(day_of_week="sun", hour=0, minute=0),
+            CronTrigger(day_of_week="sun", hour=0, minute=30),
             id="golden_moment_learning",
             name="Golden Moment Weekly Learning",
             replace_existing=True,
@@ -189,70 +216,111 @@ class AgentScheduler:
             replace_existing=True,
         )
 
-        logger.info("All jobs scheduled")
+        # No-post reminder check - every 6 hours
+        self.scheduler.add_job(
+            self._run_no_post_reminder_check,
+            IntervalTrigger(hours=6),
+            id="no_post_reminder",
+            name="No Post Reminder Check",
+            replace_existing=True,
+        )
+
+        logger.info("All jobs scheduled (autonomous + legacy)")
+
+    # ========================================
+    # AUTONOMOUS AGENT METHODS
+    # ========================================
+
+    async def _run_brain_think(self):
+        """Run the brain's thinking cycle."""
+        try:
+            logger.info("Running brain thinking cycle...")
+            result = await self.autonomous_agent.think_cycle()
+            action = result.get("action_decided", "STAY_QUIET")
+            executed = result.get("action_executed", False)
+            logger.info(f"Brain cycle: action={action}, executed={executed}")
+        except Exception as e:
+            logger.error(f"Brain think error: {e}")
+
+    async def _run_autonomous_morning(self):
+        """Run autonomous morning routine."""
+        try:
+            logger.info("Running autonomous morning routine...")
+            result = await self.autonomous_agent.morning_routine()
+            logger.info(f"Morning routine: sent={result.get('message_sent')}")
+        except Exception as e:
+            logger.error(f"Autonomous morning error: {e}")
+
+    async def _run_opportunity_scan(self):
+        """Run opportunity scanner."""
+        try:
+            logger.info("Running opportunity scan...")
+            result = await self.autonomous_agent.opportunity_scan()
+            if result.get("opportunity_found"):
+                logger.info(f"Opportunity: {result.get('opportunity_type')}, action={result.get('action_taken')}")
+            else:
+                logger.debug("No opportunities found")
+        except Exception as e:
+            logger.error(f"Opportunity scan error: {e}")
+
+    async def _run_evening_reflection(self):
+        """Run evening reflection."""
+        try:
+            logger.info("Running evening reflection...")
+            result = await self.autonomous_agent.evening_reflection()
+            logger.info(f"Evening reflection: sent={result.get('message_sent')}")
+        except Exception as e:
+            logger.error(f"Evening reflection error: {e}")
+
+    async def _run_pattern_learning(self):
+        """Run communication pattern learning."""
+        try:
+            logger.info("Learning communication patterns...")
+            await self.autonomous_agent.learn_patterns()
+            logger.info("Pattern learning completed")
+        except Exception as e:
+            logger.error(f"Pattern learning error: {e}")
+
+    async def _run_weekly_strategy(self):
+        """Run weekly strategy session."""
+        try:
+            logger.info("Running weekly strategy session...")
+            result = await self.autonomous_agent.weekly_strategy()
+            logger.info(f"Weekly strategy: sent={result.get('message_sent')}")
+        except Exception as e:
+            logger.error(f"Weekly strategy error: {e}")
+
+    async def _run_daily_reset(self):
+        """Reset daily counters."""
+        try:
+            logger.info("Resetting daily counters...")
+            self.autonomous_agent.reset_daily()
+        except Exception as e:
+            logger.error(f"Daily reset error: {e}")
+
+    async def _run_weekly_reset(self):
+        """Reset weekly counters."""
+        try:
+            logger.info("Resetting weekly counters...")
+            self.autonomous_agent.reset_weekly()
+        except Exception as e:
+            logger.error(f"Weekly reset error: {e}")
+
+    # ========================================
+    # LEGACY METHODS (Still needed)
+    # ========================================
 
     async def _run_morning_routine(self):
-        """Execute morning routine."""
+        """Execute legacy morning routine (scanning)."""
         try:
-            logger.info("Executing scheduled morning routine")
+            logger.info("Executing legacy morning routine")
             result = await agent.morning_routine()
-            logger.info(f"Morning routine completed")
+            logger.info("Morning routine completed")
         except Exception as e:
             logger.error(f"Morning routine error: {e}")
 
-    async def _run_morning_message(self):
-        """Send morning message."""
-        try:
-            logger.info("Executing scheduled morning message")
-            result = await agent.send_morning_message()
-            logger.info(f"Morning message: sent={result.get('sent')}")
-        except Exception as e:
-            logger.error(f"Morning message error: {e}")
-
-    async def _run_midday_message(self):
-        """Send midday message."""
-        try:
-            logger.info("Executing scheduled midday message")
-            result = await agent.send_midday_message()
-            logger.info(f"Midday message: sent={result.get('sent')}")
-        except Exception as e:
-            logger.error(f"Midday message error: {e}")
-
-    async def _run_afternoon_message(self):
-        """Send afternoon message."""
-        try:
-            logger.info("Executing scheduled afternoon message")
-            result = await agent.send_afternoon_message()
-            logger.info(f"Afternoon message: sent={result.get('sent')}")
-        except Exception as e:
-            logger.error(f"Afternoon message error: {e}")
-
-    async def _run_evening_message(self):
-        """Send evening message."""
-        try:
-            logger.info("Executing scheduled evening message")
-            result = await agent.send_evening_message()
-            logger.info(f"Evening message: sent={result.get('sent')}")
-        except Exception as e:
-            logger.error(f"Evening message error: {e}")
-
-    async def _run_quick_update(self):
-        """Run quick update."""
-        try:
-            logger.info("Executing scheduled quick update")
-            result = await agent.quick_update()
-            logger.info(f"Quick update completed: alert_sent={result.get('breaking_alert_sent')}")
-        except Exception as e:
-            logger.error(f"Quick update error: {e}")
-
     async def _run_no_post_reminder_check(self):
-        """
-        Check if user hasn't posted in 4+ days and send reminder.
-        Rules:
-        - Threshold: 4 days without posting
-        - Check interval: Every 6 hours
-        - Spam prevention: Wait 12 hours between reminders
-        """
+        """Check if user hasn't posted in 4+ days and send reminder."""
         try:
             logger.info("Checking for no-post reminder")
 
@@ -439,9 +507,13 @@ class AgentScheduler:
             logger.error(f"Weekly report error: {e}")
 
     def start(self):
-        """Start the scheduler."""
+        """Start the scheduler and autonomous agent."""
+        # Start autonomous agent
+        asyncio.create_task(self.autonomous_agent.start())
+
+        # Start scheduler
         self.scheduler.start()
-        logger.info("Scheduler started")
+        logger.info("Scheduler started (autonomous mode)")
 
         # Log next run times
         for job in self.scheduler.get_jobs():
@@ -449,7 +521,11 @@ class AgentScheduler:
             logger.info(f"  {job.name}: next run at {next_run}")
 
     def stop(self):
-        """Stop the scheduler."""
+        """Stop the scheduler and autonomous agent."""
+        # Stop autonomous agent
+        asyncio.create_task(self.autonomous_agent.stop())
+
+        # Stop scheduler
         self.scheduler.shutdown()
         logger.info("Scheduler stopped")
 
@@ -464,20 +540,24 @@ class AgentScheduler:
             for job in self.scheduler.get_jobs()
         ]
 
-    async def run_now(self, job_id: str):
-        """
-        Run a specific job immediately.
+    def get_agent_status(self):
+        """Get autonomous agent status."""
+        return self.autonomous_agent.get_status()
 
-        Args:
-            job_id: ID of the job to run
-        """
+    async def run_now(self, job_id: str):
+        """Run a specific job immediately."""
         job_map = {
+            # Autonomous jobs
+            "brain_think": self._run_brain_think,
+            "autonomous_morning": self._run_autonomous_morning,
+            "opportunity_scan": self._run_opportunity_scan,
+            "evening_reflection": self._run_evening_reflection,
+            "weekly_strategy": self._run_weekly_strategy,
+            # Legacy jobs
             "morning_routine": self._run_morning_routine,
-            "morning_message": self._run_morning_message,
-            "midday_message": self._run_midday_message,
-            "afternoon_message": self._run_afternoon_message,
-            "evening_message": self._run_evening_message,
-            "quick_update": self._run_quick_update,
+            "golden_moment_check": self._run_golden_moment_check,
+            "virality_check": self._run_virality_check,
+            "weekly_report": self._run_weekly_report,
         }
 
         if job_id in job_map:
