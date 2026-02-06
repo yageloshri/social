@@ -145,12 +145,15 @@ class ProfileScanner(BaseSkill):
 
             # The profile scraper returns profile data with posts in 'latestPosts' field
             posts_list = []
+            followers_count = 0
             for item in items:
+                # Extract follower count from profile data
+                followers_count = item.get("followersCount", 0) or item.get("followers", 0) or 0
                 # Extract posts from the profile's latestPosts field
                 latest_posts = item.get("latestPosts", [])
                 posts_list.extend(latest_posts)
 
-            logger.info(f"Apify returned {len(posts_list)} posts for Instagram")
+            logger.info(f"Apify returned {len(posts_list)} posts for Instagram (followers: {followers_count})")
 
             # Get historical averages for comparison
             historical = await self.get_historical_averages("instagram")
@@ -239,14 +242,20 @@ class ProfileScanner(BaseSkill):
                         result["new_posts"] += 1
                         new_posts_for_analysis.append(post_data)
 
-                # Update scraper status
+                # Update scraper status with follower count
                 self._update_scraper_status(
                     session, "instagram",
                     success=True,
-                    posts_fetched=len(posts_list)
+                    posts_fetched=len(posts_list),
+                    followers_count=followers_count
                 )
 
                 session.commit()
+
+                # Calculate engagement for all posts using follower count
+                if followers_count > 0:
+                    self._recalculate_engagement_for_platform(session, "instagram", followers_count)
+                    session.commit()
 
                 # Generate smart analysis for new posts only
                 for post_data in new_posts_for_analysis:
@@ -303,6 +312,13 @@ class ProfileScanner(BaseSkill):
 
             # Fetch results
             items = list(self.apify_client.dataset(run["defaultDatasetId"]).iterate_items())
+
+            # Extract follower count from authorMeta of first item
+            followers_count = 0
+            if items:
+                author_meta = items[0].get("authorMeta", {}) or {}
+                followers_count = author_meta.get("fans", 0) or author_meta.get("followers", 0) or 0
+                logger.info(f"TikTok followers: {followers_count}")
 
             # Get historical averages for comparison
             historical = await self.get_historical_averages("tiktok")
@@ -364,19 +380,31 @@ class ProfileScanner(BaseSkill):
                         self._update_post_metrics(session, existing, post_data)
                         result["updated_posts"] += 1
                     else:
+                        # Calculate engagement rate for TikTok: (likes + comments) / views * 100
+                        engagement_rate = 0.0
+                        views = post_data.get("views", 0)
+                        likes = post_data.get("likes", 0)
+                        comments = post_data.get("comments", 0)
+                        shares = post_data.get("shares", 0)
+                        if views > 0:
+                            total_engagement = likes + comments + shares
+                            engagement_rate = (total_engagement / views) * 100
+
                         new_post = Post(
                             platform="tiktok",
+                            engagement_rate=engagement_rate,
                             **post_data
                         )
                         session.add(new_post)
                         result["new_posts"] += 1
                         new_posts_for_analysis.append(post_data)
 
-                # Update scraper status
+                # Update scraper status with follower count
                 self._update_scraper_status(
                     session, "tiktok",
                     success=True,
-                    posts_fetched=len(items)
+                    posts_fetched=len(items),
+                    followers_count=followers_count
                 )
 
                 session.commit()
@@ -431,10 +459,35 @@ class ProfileScanner(BaseSkill):
         post.saves = new_data.get("saves", post.saves)
         post.last_updated = datetime.utcnow()
 
-        # Calculate engagement rate
+        # Calculate engagement rate based on platform
         total_engagement = post.likes + post.comments + (post.shares or 0) + (post.saves or 0)
-        if post.views and post.views > 0:
-            post.engagement_rate = (total_engagement / post.views) * 100
+        if post.platform == "tiktok":
+            # TikTok: engagement / views
+            if post.views and post.views > 0:
+                post.engagement_rate = (total_engagement / post.views) * 100
+        # Instagram engagement is calculated in _recalculate_engagement_for_platform using followers
+
+    def _recalculate_engagement_for_platform(self, session, platform: str, followers_count: int):
+        """
+        Recalculate engagement rate for all posts of a platform using follower count.
+
+        For Instagram: engagement_rate = (likes + comments) / followers * 100
+        For TikTok: engagement_rate = (likes + comments) / views * 100 (already done in _update_post_metrics)
+
+        Args:
+            session: Database session
+            platform: Platform name
+            followers_count: Current follower count
+        """
+        if platform != "instagram" or followers_count <= 0:
+            return
+
+        posts = session.query(Post).filter(Post.platform == platform).all()
+        for post in posts:
+            total_engagement = (post.likes or 0) + (post.comments or 0)
+            post.engagement_rate = (total_engagement / followers_count) * 100
+
+        logger.info(f"Recalculated engagement for {len(posts)} {platform} posts using {followers_count} followers")
 
     async def get_recent_posts(
         self,
@@ -504,7 +557,8 @@ class ProfileScanner(BaseSkill):
         platform: str,
         success: bool,
         posts_fetched: int = 0,
-        error: str = None
+        error: str = None,
+        followers_count: int = 0
     ):
         """Update scraper status in database."""
         status = session.query(ScraperStatus).filter_by(platform=platform).first()
@@ -519,6 +573,8 @@ class ProfileScanner(BaseSkill):
             status.status = "working"
             status.posts_fetched = posts_fetched
             status.last_error = None
+            if followers_count > 0:
+                status.followers_count = followers_count
         else:
             status.status = "failed"
             status.last_error = error
@@ -555,6 +611,7 @@ class ProfileScanner(BaseSkill):
                         "last_scan": status.last_scan_at,
                         "last_success": status.last_success_at,
                         "posts_fetched": status.posts_fetched,
+                        "followers_count": status.followers_count or 0,
                         "error": status.last_error,
                     }
 

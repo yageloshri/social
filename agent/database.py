@@ -293,6 +293,7 @@ class ScraperStatus(Base):
     last_success_at = Column(DateTime)
     last_error = Column(Text)
     posts_fetched = Column(Integer, default=0)
+    followers_count = Column(Integer, default=0)  # Follower count for engagement calc
     status = Column(String(20), default="unknown")  # 'working', 'failed', 'unknown'
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
