@@ -508,6 +508,10 @@ class AgentScheduler:
 
     def start(self):
         """Start the scheduler and autonomous agent."""
+        # Ensure database tables are created
+        db.create_tables()
+        logger.info("Database tables initialized")
+
         # Start autonomous agent
         asyncio.create_task(self.autonomous_agent.start())
 
@@ -519,6 +523,30 @@ class AgentScheduler:
         for job in self.scheduler.get_jobs():
             next_run = job.next_run_time
             logger.info(f"  {job.name}: next run at {next_run}")
+
+        # Run initial scan on startup (don't wait for scheduled time)
+        asyncio.create_task(self._run_startup_scan())
+
+    async def _run_startup_scan(self):
+        """Run initial profile scan on startup."""
+        try:
+            from .skills.profile_scanner import ProfileScanner
+
+            logger.info("Running startup profile scan...")
+            scanner = ProfileScanner()
+            result = await scanner.execute(platforms=["instagram", "tiktok"])
+
+            new_posts = result.get("new_posts", 0)
+            updated_posts = result.get("updated_posts", 0)
+            errors = result.get("errors", [])
+
+            if errors:
+                logger.warning(f"Startup scan completed with errors: {errors}")
+            else:
+                logger.info(f"Startup scan complete: {new_posts} new posts, {updated_posts} updated posts")
+
+        except Exception as e:
+            logger.error(f"Startup scan error: {e}")
 
     def stop(self):
         """Stop the scheduler and autonomous agent."""

@@ -278,14 +278,41 @@ class ProfileScanner(BaseSkill):
 
                     existing = session.query(Post).filter_by(post_id=post_id).first()
 
+                    # Extract hashtags - they come as list of dicts with 'name' key
+                    hashtags_raw = item.get("hashtags", [])
+                    hashtags = []
+                    for tag in hashtags_raw:
+                        if isinstance(tag, dict):
+                            name = tag.get("name", "")
+                            if name:
+                                hashtags.append(name)
+                        elif isinstance(tag, str):
+                            hashtags.append(tag)
+
+                    # Extract mentions - they come as list of strings like '@username'
+                    mentions_raw = item.get("mentions", [])
+                    mentions = []
+                    for mention in mentions_raw:
+                        if isinstance(mention, dict):
+                            user_id = mention.get("userUniqueId", "") or mention.get("uniqueId", "")
+                            if user_id:
+                                mentions.append(user_id)
+                        elif isinstance(mention, str):
+                            # Remove @ prefix if present
+                            mentions.append(mention.lstrip("@"))
+
+                    # Extract video metadata safely
+                    video_meta = item.get("videoMeta", {}) or {}
+                    duration = video_meta.get("duration", 0) if isinstance(video_meta, dict) else 0
+
                     post_data = {
                         "post_id": post_id,
                         "url": item.get("webVideoUrl", ""),
                         "caption": item.get("text", ""),
-                        "hashtags": [tag.get("name", "") for tag in item.get("hashtags", [])],
-                        "mentions": [mention.get("userUniqueId", "") for mention in item.get("mentions", [])],
+                        "hashtags": hashtags,
+                        "mentions": mentions,
                         "media_type": "video",
-                        "duration_seconds": item.get("videoMeta", {}).get("duration", 0),
+                        "duration_seconds": duration,
                         "views": item.get("playCount", 0),
                         "likes": item.get("diggCount", 0),
                         "comments": item.get("commentCount", 0),
