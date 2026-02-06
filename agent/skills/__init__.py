@@ -13,6 +13,9 @@ from .message_crafter import MessageCrafter
 from .memory_core import MemoryCore
 from .feedback_learner import FeedbackLearner
 from .golden_moment import GoldenMomentDetector
+from .virality_predictor import ViralityPredictor
+from .series_detector import SeriesDetector
+from .weekly_reporter import WeeklyReporter
 
 __all__ = [
     "ProfileScanner",
@@ -23,4 +26,7 @@ __all__ = [
     "MemoryCore",
     "FeedbackLearner",
     "GoldenMomentDetector",
+    "ViralityPredictor",
+    "SeriesDetector",
+    "WeeklyReporter",
 ]

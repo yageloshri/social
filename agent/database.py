@@ -63,6 +63,9 @@ class PostMetricHistory(Base):
     id = Column(Integer, primary_key=True)
     post_id = Column(Integer, ForeignKey("posts.id"), nullable=False)
 
+    # Hour mark for virality tracking (1, 3, 6, 24, etc.)
+    hours_since_post = Column(Integer)
+
     views = Column(Integer, default=0)
     likes = Column(Integer, default=0)
     comments = Column(Integer, default=0)
@@ -373,6 +376,68 @@ class DailyReport(Base):
     recommendations = Column(JSON)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ContentSeries(Base):
+    """Track content series (recurring themes/formats)."""
+    __tablename__ = "content_series"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)  # "דברים שלמדתי מלגור עם זוהר"
+    original_post_id = Column(Integer, ForeignKey("posts.id"))
+    total_parts_planned = Column(Integer, default=4)
+    parts_posted = Column(Integer, default=1)
+    status = Column(String(20), default="active")  # 'active', 'completed', 'paused'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    original_post = relationship("Post")
+    parts = relationship("SeriesPart", back_populates="series")
+
+
+class SeriesPart(Base):
+    """Individual parts of a content series."""
+    __tablename__ = "series_parts"
+
+    id = Column(Integer, primary_key=True)
+    series_id = Column(Integer, ForeignKey("content_series.id"), nullable=False)
+    part_number = Column(Integer, nullable=False)
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=True)  # Null if not posted yet
+    idea = Column(Text)  # The idea/concept for this part
+    status = Column(String(20), default="planned")  # 'planned', 'posted', 'skipped'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    posted_at = Column(DateTime)
+
+    # Relationships
+    series = relationship("ContentSeries", back_populates="parts")
+    post = relationship("Post")
+
+
+class WeeklyReport(Base):
+    """Weekly performance report."""
+    __tablename__ = "weekly_reports"
+
+    id = Column(Integer, primary_key=True)
+    week_start = Column(DateTime, nullable=False)
+    week_end = Column(DateTime, nullable=False)
+
+    # Metrics
+    total_views = Column(Integer, default=0)
+    total_likes = Column(Integer, default=0)
+    total_comments = Column(Integer, default=0)
+    posts_count = Column(Integer, default=0)
+
+    # Best post
+    best_post_id = Column(Integer, ForeignKey("posts.id"))
+
+    # Full report data (JSON)
+    report_json = Column(JSON)
+
+    # Timestamps
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    best_post = relationship("Post")
 
 
 class Database:

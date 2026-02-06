@@ -18,6 +18,9 @@ from .core_agent import agent
 from .database import db, ReminderLog, Post
 from .integrations.whatsapp import whatsapp
 from .skills.golden_moment import GoldenMomentDetector
+from .skills.virality_predictor import ViralityPredictor
+from .skills.series_detector import SeriesDetector
+from .skills.weekly_reporter import WeeklyReporter
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,9 @@ class AgentScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=ISRAEL_TZ)
         self.golden_moment_detector = GoldenMomentDetector()
+        self.virality_predictor = ViralityPredictor()
+        self.series_detector = SeriesDetector()
+        self.weekly_reporter = WeeklyReporter()
         self._setup_jobs()
 
     def _setup_jobs(self):
@@ -153,6 +159,33 @@ class AgentScheduler:
             CronTrigger(day_of_week="sun", hour=0, minute=0),
             id="golden_moment_learning",
             name="Golden Moment Weekly Learning",
+            replace_existing=True,
+        )
+
+        # Virality check - every hour
+        self.scheduler.add_job(
+            self._run_virality_check,
+            IntervalTrigger(hours=1),
+            id="virality_check",
+            name="Check New Posts for Virality",
+            replace_existing=True,
+        )
+
+        # Series potential scan - Saturday at 20:00
+        self.scheduler.add_job(
+            self._run_series_scan,
+            CronTrigger(day_of_week="sat", hour=20, minute=0),
+            id="series_scan",
+            name="Scan for Series Potential",
+            replace_existing=True,
+        )
+
+        # Weekly report - Friday at 18:00
+        self.scheduler.add_job(
+            self._run_weekly_report,
+            CronTrigger(day_of_week="fri", hour=18, minute=0),
+            id="weekly_report",
+            name="Send Weekly Performance Report",
             replace_existing=True,
         )
 
@@ -365,6 +398,45 @@ class AgentScheduler:
 
         except Exception as e:
             logger.error(f"Golden moment learning error: {e}")
+
+    async def _run_virality_check(self):
+        """Check new posts for early virality signals."""
+        try:
+            logger.info("Checking posts for virality...")
+            result = await self.virality_predictor.execute()
+
+            if result.get("alerts_sent", 0) > 0:
+                logger.info(f"Virality alerts sent: {result.get('alerts_sent')}")
+            else:
+                logger.info(f"Checked {result.get('posts_checked', 0)} posts, no viral signals")
+
+        except Exception as e:
+            logger.error(f"Virality check error: {e}")
+
+    async def _run_series_scan(self):
+        """Scan successful posts for series potential."""
+        try:
+            logger.info("Scanning for series potential...")
+            result = await self.series_detector.execute()
+
+            logger.info(f"Series scan: {result.get('series_potential_found', 0)} potential series found")
+
+        except Exception as e:
+            logger.error(f"Series scan error: {e}")
+
+    async def _run_weekly_report(self):
+        """Generate and send weekly performance report."""
+        try:
+            logger.info("Generating weekly report...")
+            result = await self.weekly_reporter.execute()
+
+            if result.get("sent"):
+                logger.info(f"Weekly report sent: {result.get('total_views', 0)} total views")
+            else:
+                logger.error("Failed to send weekly report")
+
+        except Exception as e:
+            logger.error(f"Weekly report error: {e}")
 
     def start(self):
         """Start the scheduler."""

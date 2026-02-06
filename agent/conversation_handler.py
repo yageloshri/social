@@ -15,7 +15,10 @@ from anthropic import Anthropic
 
 from .config import config
 from .database import db, Idea, Trend, Post, Conversation, UserPreference
-from .skills import IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner, ProfileScanner, GoldenMomentDetector
+from .skills import (
+    IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner, ProfileScanner,
+    GoldenMomentDetector, ViralityPredictor, SeriesDetector, WeeklyReporter
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,9 @@ class ConversationHandler:
         self.feedback_learner = FeedbackLearner()
         self.profile_scanner = ProfileScanner()
         self.golden_moment_detector = GoldenMomentDetector()
+        self.virality_predictor = ViralityPredictor()
+        self.series_detector = SeriesDetector()
+        self.weekly_reporter = WeeklyReporter()
 
         # Track last sent idea for feedback
         self.last_idea_id: Optional[int] = None
@@ -54,7 +60,11 @@ class ConversationHandler:
             "full_status": ["סטטוס מלא", "full status", "הכל", "כל הסטטוס"],
             "liked": ["אהבתי", "liked", "טוב", "מעולה", "👍", "❤️", "🔥", "אחלה"],
             "disliked": ["לא אהבתי", "disliked", "לא טוב", "👎", "לא מתאים", "לא בשבילי"],
-            "status": ["סטטוס", "status", "איך אני", "סיכום", "ביצועים", "נתונים"],
+            "status": ["סטטוס", "status", "איך אני", "סיכום", "נתונים"],
+            "performance": ["ביצועים", "performance", "איך הולך"],
+            "series": ["סדרות", "series", "סדרה"],
+            "report": ["דוח", "report", "דוח שבועי"],
+            "compare": ["השוואה", "compare", "השוואה לחודש"],
             "help": ["עזרה", "help", "פקודות", "מה אפשר"],
         }
 
@@ -172,6 +182,14 @@ class ConversationHandler:
             return await self._cmd_disliked()
         elif command == "status":
             return await self._cmd_status()
+        elif command == "performance":
+            return await self._cmd_performance()
+        elif command == "series":
+            return await self._cmd_series()
+        elif command == "report":
+            return await self._cmd_report()
+        elif command == "compare":
+            return await self._cmd_compare()
         elif command == "help":
             return await self._cmd_help()
         else:
@@ -512,6 +530,10 @@ class ConversationHandler:
 🔥 *"טרנדים"* - מה חם עכשיו (עם ניתוח AI)
 📰 *"חדשות"* - כותרות אחרונות מהעולם
 📊 *"סטטוס"* - איך אתה מבצע השבוע
+🚀 *"ביצועים"* - ביצועי הפוסטים האחרונים
+📺 *"סדרות"* - סדרות תוכן פעילות ופוטנציאליות
+📋 *"דוח"* - דוח שבועי מלא
+📈 *"השוואה"* - השוואה לשבועות קודמים
 🔍 *"סקרייפר"* - בדוק סטטוס סריקה
 📋 *"סטטוס מלא"* - כל הנתונים במקום אחד
 👍 *"אהבתי"* - הרעיון האחרון היה טוב
@@ -530,6 +552,114 @@ class ConversationHandler:
 • "מה דעתך על תוכן מוזיקלי?"
 
 אני לומד מכל שיחה ומשתפר! 🧠"""
+
+    async def _cmd_performance(self) -> str:
+        """Show recent posts performance."""
+        try:
+            result = await self.virality_predictor.get_performance_summary(limit=3)
+            posts = result.get("posts", [])
+            avg_views = result.get("avg_views", 0)
+
+            if not posts:
+                return "אין פוסטים אחרונים לנתח 🤷‍♂️"
+
+            response = "📊 *ביצועים אחרונים:*\n\n"
+
+            for post in posts:
+                hours = post["hours_since"]
+                if hours < 24:
+                    time_str = f"לפני {int(hours)} שעות"
+                else:
+                    time_str = f"לפני {int(hours / 24)} ימים"
+
+                caption = post["caption"]
+                if len(caption) > 30:
+                    caption = caption[:30] + "..."
+
+                multiplier = post["multiplier"]
+                emoji = post["emoji"]
+
+                response += f"*[{time_str}]* '{caption}'\n"
+                response += f"👁️ {post['views']:,} צפיות"
+
+                if multiplier >= 1.5:
+                    response += f" (פי {multiplier:.1f} מהממוצע! {emoji})"
+                elif multiplier < 0.7:
+                    response += f" (מתחת לממוצע {emoji})"
+                else:
+                    response += f" {emoji}"
+
+                response += f"\n❤️ {post['likes']:,} לייקים | 💬 {post['comments']:,} תגובות\n"
+
+                if post["status"] == "running":
+                    response += f"📈 *חיזוי:* {post['predicted_views']:,} צפיות עד מחר\n"
+
+                response += "\n"
+
+            response += f"📊 ממוצע צפיות: {int(avg_views):,}"
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting performance: {e}")
+            return "לא הצלחתי לשלוף ביצועים כרגע 🙏"
+
+    async def _cmd_series(self) -> str:
+        """Show active and potential content series."""
+        try:
+            result = await self.series_detector.get_series_summary()
+            active = result.get("active", [])
+            potential = result.get("potential", [])
+
+            response = "📺 *הסדרות שלך:*\n\n"
+
+            if active:
+                response += "🟢 *פעילות:*\n"
+                for series in active:
+                    response += f"\n*'{series['name']}'*\n"
+                    response += f"• חלקים: {series['parts_posted']}/{series['parts_planned']} פורסמו\n"
+                    response += f"• צפיות כולל: {series['total_views']:,}\n"
+                    if series['next_idea']:
+                        response += f"• הבא: {series['next_idea'][:40]}...\n"
+                response += "\n"
+
+            if potential:
+                response += "💡 *פוטנציאל לסדרה:*\n"
+                for post in potential:
+                    response += f"\n• '{post['caption'][:30]}...' ({post['views']:,} צפיות)\n"
+                    response += f"  ציון פוטנציאל: {post['score']}/100\n"
+
+            if not active and not potential:
+                response = """📺 *עדיין אין סדרות*
+
+כשתהיה לך פוסט מאוד מצליח עם פוטנציאל להמשך, אודיע לך!
+
+💡 טיפ: סדרות עובדות מעולה ברשתות!"""
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting series: {e}")
+            return "לא הצלחתי לשלוף סדרות כרגע 🙏"
+
+    async def _cmd_report(self) -> str:
+        """Generate and return weekly report."""
+        try:
+            report = await self.weekly_reporter.generate_weekly_report()
+            return self.weekly_reporter._format_report_message(report)
+
+        except Exception as e:
+            logger.error(f"Error generating report: {e}")
+            return "לא הצלחתי לייצר דוח כרגע 🙏"
+
+    async def _cmd_compare(self) -> str:
+        """Compare to previous weeks."""
+        try:
+            return await self.weekly_reporter.generate_comparison(weeks=4)
+
+        except Exception as e:
+            logger.error(f"Error generating comparison: {e}")
+            return "לא הצלחתי לייצר השוואה כרגע 🙏"
 
     async def _handle_preference(self, preference: Dict, original_message: str) -> str:
         """Handle a preference statement and learn from it."""
