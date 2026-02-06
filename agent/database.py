@@ -294,6 +294,53 @@ class ScraperStatus(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class GoldenMomentAlert(Base):
+    """Track golden moment alerts for learning and spam prevention."""
+    __tablename__ = "golden_moment_alerts"
+
+    id = Column(Integer, primary_key=True)
+
+    # Trend info
+    trend_id = Column(Integer, ForeignKey("trends.id"))
+    trend_topic = Column(String(500), nullable=False)
+    trend_source = Column(String(200))
+    relevance_score = Column(Float)
+
+    # Alert timing
+    alert_sent_at = Column(DateTime, default=datetime.utcnow)
+    trend_discovered_at = Column(DateTime)  # When trend first appeared
+
+    # User response
+    response = Column(String(50))  # 'used', 'ignored', 'remind_later', 'not_interested'
+    response_at = Column(DateTime)
+
+    # Outcome tracking
+    was_used = Column(Boolean, default=False)
+    resulting_post_id = Column(Integer, ForeignKey("posts.id"))
+    post_performance = Column(String(50))  # 'high', 'medium', 'low' after post
+
+    # Learning data
+    idea_suggested = Column(Text)  # The quick idea we suggested
+    hashtags_suggested = Column(JSON)
+
+    # Relationships
+    trend = relationship("Trend")
+    resulting_post = relationship("Post")
+
+
+class TopicWeight(Base):
+    """Learned topic weights for golden moment relevance."""
+    __tablename__ = "topic_weights"
+
+    id = Column(Integer, primary_key=True)
+    topic = Column(String(200), nullable=False, unique=True)
+    weight = Column(Float, default=1.0)  # >1 = prefer, <1 = avoid
+    times_alerted = Column(Integer, default=0)
+    times_used = Column(Integer, default=0)
+    times_ignored = Column(Integer, default=0)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyReport(Base):
     """Daily summary report."""
     __tablename__ = "daily_reports"

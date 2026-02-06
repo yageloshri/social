@@ -17,6 +17,7 @@ from .config import config
 from .core_agent import agent
 from .database import db, ReminderLog, Post
 from .integrations.whatsapp import whatsapp
+from .skills.golden_moment import GoldenMomentDetector
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class AgentScheduler:
 
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=ISRAEL_TZ)
+        self.golden_moment_detector = GoldenMomentDetector()
         self._setup_jobs()
 
     def _setup_jobs(self):
@@ -124,6 +126,33 @@ class AgentScheduler:
             IntervalTrigger(hours=6),
             id="no_post_reminder",
             name="No Post Reminder Check",
+            replace_existing=True,
+        )
+
+        # Golden Moment check - every 30 minutes during prime time (16:00-21:00)
+        self.scheduler.add_job(
+            self._run_golden_moment_check,
+            CronTrigger(hour="16-21", minute="0,30"),
+            id="golden_moment_check",
+            name="Golden Moment Check (Prime Time)",
+            replace_existing=True,
+        )
+
+        # Golden Moment remind later check - every hour
+        self.scheduler.add_job(
+            self._run_remind_later_check,
+            IntervalTrigger(hours=1),
+            id="remind_later_check",
+            name="Golden Moment Remind Later Check",
+            replace_existing=True,
+        )
+
+        # Golden Moment weekly learning - Sunday at midnight
+        self.scheduler.add_job(
+            self._run_golden_moment_learning,
+            CronTrigger(day_of_week="sun", hour=0, minute=0),
+            id="golden_moment_learning",
+            name="Golden Moment Weekly Learning",
             replace_existing=True,
         )
 
@@ -295,6 +324,47 @@ class AgentScheduler:
             session.commit()
         finally:
             session.close()
+
+    async def _run_golden_moment_check(self):
+        """Check for golden moment opportunities during prime time."""
+        try:
+            logger.info("Checking for golden moments...")
+            result = await self.golden_moment_detector.execute()
+
+            if result.get("alert_sent"):
+                logger.info(f"Golden moment alert sent for: {result.get('topic')}")
+            elif result.get("skipped_reason"):
+                logger.info(f"Golden moment skipped: {result.get('skipped_reason')}")
+            else:
+                logger.info("No golden moments found")
+
+        except Exception as e:
+            logger.error(f"Golden moment check error: {e}")
+
+    async def _run_remind_later_check(self):
+        """Check for remind_later golden moments that need re-alerting."""
+        try:
+            logger.info("Checking remind_later golden moments...")
+            result = await self.golden_moment_detector.check_remind_later()
+
+            if result.get("reminded"):
+                logger.info(f"Re-sent reminder for: {result.get('topic')}")
+            else:
+                logger.info("No remind_later items ready")
+
+        except Exception as e:
+            logger.error(f"Remind later check error: {e}")
+
+    async def _run_golden_moment_learning(self):
+        """Run weekly learning to adjust topic weights based on usage patterns."""
+        try:
+            logger.info("Running golden moment weekly learning...")
+            result = await self.golden_moment_detector.run_weekly_learning()
+
+            logger.info(f"Learning completed: {result.get('topics_updated', 0)} topics updated")
+
+        except Exception as e:
+            logger.error(f"Golden moment learning error: {e}")
 
     def start(self):
         """Start the scheduler."""

@@ -12,6 +12,7 @@ from .idea_engine import IdeaEngine
 from .message_crafter import MessageCrafter
 from .memory_core import MemoryCore
 from .feedback_learner import FeedbackLearner
+from .golden_moment import GoldenMomentDetector
 
 __all__ = [
     "ProfileScanner",
@@ -21,4 +22,5 @@ __all__ = [
     "MessageCrafter",
     "MemoryCore",
     "FeedbackLearner",
+    "GoldenMomentDetector",
 ]

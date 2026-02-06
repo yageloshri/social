@@ -15,7 +15,7 @@ from anthropic import Anthropic
 
 from .config import config
 from .database import db, Idea, Trend, Post, Conversation, UserPreference
-from .skills import IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner, ProfileScanner
+from .skills import IdeaEngine, TrendRadar, MemoryCore, FeedbackLearner, ProfileScanner, GoldenMomentDetector
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class ConversationHandler:
         self.memory_core = MemoryCore()
         self.feedback_learner = FeedbackLearner()
         self.profile_scanner = ProfileScanner()
+        self.golden_moment_detector = GoldenMomentDetector()
 
         # Track last sent idea for feedback
         self.last_idea_id: Optional[int] = None
@@ -74,19 +75,24 @@ class ConversationHandler:
         # Clean and normalize message
         message_lower = message.lower().strip()
 
-        # Check for commands
-        command = self._detect_command(message_lower)
-
-        if command:
-            response = await self._handle_command(command, message)
+        # Check for golden moment responses first (בוצע, עוד, לא מעוניין, אחר כך)
+        golden_response = await self.golden_moment_detector.handle_response(message)
+        if golden_response:
+            response = golden_response
         else:
-            # Check for preference statements
-            preference = self._detect_preference(message)
-            if preference:
-                response = await self._handle_preference(preference, message)
+            # Check for commands
+            command = self._detect_command(message_lower)
+
+            if command:
+                response = await self._handle_command(command, message)
             else:
-                # Natural conversation
-                response = await self._handle_conversation(message)
+                # Check for preference statements
+                preference = self._detect_preference(message)
+                if preference:
+                    response = await self._handle_preference(preference, message)
+                else:
+                    # Natural conversation
+                    response = await self._handle_conversation(message)
 
         # Store the response
         await self._store_conversation(response, from_number, "outgoing")
@@ -510,6 +516,12 @@ class ConversationHandler:
 📋 *"סטטוס מלא"* - כל הנתונים במקום אחד
 👍 *"אהבתי"* - הרעיון האחרון היה טוב
 👎 *"לא אהבתי"* - הרעיון לא מתאים
+
+🚨 *תגובות ל"רגע זהב":*
+• *"בוצע"* - השתמשתי ברעיון
+• *"עוד"* - תן לי רעיון אחר לטרנד
+• *"לא מעוניין"* - דלג על הטרנד הזה
+• *"אחר כך"* - תזכיר לי בעוד שעה
 
 💬 *טיפ:* אתה יכול גם לדבר איתי חופשי!
 למשל:
