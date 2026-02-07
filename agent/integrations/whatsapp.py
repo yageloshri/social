@@ -20,9 +20,12 @@ class WhatsAppClient:
 
     Setup:
     1. Create Twilio account at https://www.twilio.com
-    2. Enable WhatsApp Sandbox
-    3. Send join code from your phone
-    4. Get Account SID, Auth Token, and Sandbox number
+    2. Set up WhatsApp Business API or Sandbox
+    3. Configure environment variables:
+       - TWILIO_ACCOUNT_SID
+       - TWILIO_AUTH_TOKEN
+       - TWILIO_WHATSAPP_NUMBER (e.g., whatsapp:+15557660396)
+       - MY_WHATSAPP_NUMBER (recipient number)
     """
 
     def __init__(self):
